@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -11,7 +11,8 @@ import {
   View,
 } from "react-native";
 import { BookCard } from "./components/BookCard";
-import { MOCK_BOOKS, MOCK_RECOMMENDATIONS, MOCK_USERS } from "./data/mockData";
+import { MOCK_RECOMMENDATIONS, MOCK_USERS } from "./data/mockData";
+import { createBook, fetchBooks } from "./services/api";
 import type { AuthProvider, AuthUser, Book, ClubMember, Recommendation } from "./types";
 
 type Screen = "home" | "books" | "recommendations";
@@ -20,7 +21,9 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [members] = useState<ClubMember[]>(MOCK_USERS);
-  const [favoriteBooks, setFavoriteBooks] = useState<Book[]>(MOCK_BOOKS);
+  const [favoriteBooks, setFavoriteBooks] = useState<Book[]>([]);
+  const [booksLoading, setBooksLoading] = useState(false);
+  const [booksError, setBooksError] = useState<string | null>(null);
   const [query, setQuery] = useState("cozy mystery for a rainy weekend");
   const [authMode, setAuthMode] = useState<"social" | "email">("social");
   const [name, setName] = useState("");
@@ -37,17 +40,59 @@ export default function App() {
     }));
   }, [query]);
 
-  const addSampleBook = () => {
-    const nextBook: Book = {
-      id: String(Date.now()),
-      title: "The House in the Cerulean Sea",
-      author: "TJ Klune",
-      genre: "Fantasy",
-      note: "Warm character-driven pick for the club shortlist.",
+  useEffect(() => {
+    if (!authUser) {
+      return;
+    }
+
+    let ignore = false;
+
+    const loadBooks = async () => {
+      setBooksLoading(true);
+      setBooksError(null);
+
+      try {
+        const books = await fetchBooks();
+
+        if (!ignore) {
+          setFavoriteBooks(books);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setBooksError(error instanceof Error ? error.message : "Failed to load books.");
+        }
+      } finally {
+        if (!ignore) {
+          setBooksLoading(false);
+        }
+      }
     };
 
-    setFavoriteBooks((current) => [nextBook, ...current]);
-    setScreen("books");
+    void loadBooks();
+
+    return () => {
+      ignore = true;
+    };
+  }, [authUser]);
+
+  const addSampleBook = async () => {
+    try {
+      const nextBook = await createBook({
+        title: "The House in the Cerulean Sea",
+        author: "TJ Klune",
+        genre: "Fantasy",
+        description: "Warm character-driven pick for the club shortlist.",
+      });
+
+      setFavoriteBooks((current) => [nextBook, ...current]);
+      setScreen("books");
+      setBooksError(null);
+    } catch (error) {
+      Alert.alert(
+        "Could not save book",
+        error instanceof Error ? error.message : "The API is unavailable."
+      );
+    }
   };
 
   const completeAuth = (provider: AuthProvider, nextName: string, nextEmail: string) => {
@@ -171,6 +216,9 @@ export default function App() {
               Google and Facebook sign-in are UI placeholders here. Real OAuth still needs Expo auth
               libraries, provider app IDs, and backend token verification.
             </Text>
+            <Text style={styles.helperText}>
+              Book data loads from the local API at `EXPO_PUBLIC_API_BASE_URL` or `http://localhost:4000`.
+            </Text>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -252,8 +300,10 @@ export default function App() {
                   <Stat label="Top vibe" value="Smart + cozy" />
                 </View>
                 <Pressable style={styles.secondaryButton} onPress={addSampleBook}>
-                  <Text style={styles.secondaryButtonText}>Add a sample favorite</Text>
+                  <Text style={styles.secondaryButtonText}>Add a sample favorite via API</Text>
                 </Pressable>
+                {booksLoading ? <Text style={styles.helperText}>Loading books from API...</Text> : null}
+                {booksError ? <Text style={styles.errorText}>{booksError}</Text> : null}
               </Card>
             </View>
           ) : null}
@@ -261,6 +311,11 @@ export default function App() {
           {screen === "books" ? (
             <View style={styles.stack}>
               <Text style={styles.screenHeading}>Favorite books from the group</Text>
+              {booksLoading ? <Text style={styles.bodyText}>Loading books from API...</Text> : null}
+              {booksError ? <Text style={styles.errorText}>{booksError}</Text> : null}
+              {!booksLoading && favoriteBooks.length === 0 ? (
+                <Text style={styles.bodyText}>No books returned by the API yet.</Text>
+              ) : null}
               {favoriteBooks.map((book) => (
                 <BookCard key={book.id} book={book} />
               ))}
@@ -447,6 +502,11 @@ const styles = StyleSheet.create({
     color: "#5E554C",
     fontSize: 15,
     lineHeight: 22,
+  },
+  errorText: {
+    color: "#A04732",
+    fontSize: 13,
+    lineHeight: 19,
   },
   helperText: {
     color: "#7B7268",

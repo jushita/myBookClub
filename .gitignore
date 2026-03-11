@@ -1,0 +1,14 @@
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+node_modules/
+
+my-book-club-ui/.expo/
+my-book-club-ui/dist/
+my-book-club-ui/web-build/
+
+my-book-club-api/dist/
+my-book-club-api/coverage/

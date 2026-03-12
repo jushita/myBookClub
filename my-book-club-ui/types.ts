@@ -3,7 +3,15 @@ export type ClubMember = {
   name: string;
 };
 
-export type AuthProvider = "google" | "facebook" | "email";
+export type Club = {
+  id: string;
+  name: string;
+  vibe: string;
+  promptSeed: string;
+  memberIds: string[];
+};
+
+export type AuthProvider = "google" | "email";
 
 export type AuthUser = {
   id: string;

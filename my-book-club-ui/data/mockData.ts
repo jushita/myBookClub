@@ -1,10 +1,34 @@
-import type { Book, ClubMember, Recommendation } from "../types";
+import type { Book, Club, ClubMember, Recommendation } from "../types";
 
 export const MOCK_USERS: ClubMember[] = [
   { id: "1", name: "Maya" },
   { id: "2", name: "Jordan" },
   { id: "3", name: "Priya" },
   { id: "4", name: "Eli" },
+];
+
+export const MOCK_CLUBS: Club[] = [
+  {
+    id: "c1",
+    name: "Wednesday Night Readers",
+    vibe: "Moody suspense",
+    promptSeed: "cozy mystery for a rainy weekend",
+    memberIds: ["1", "2", "3"],
+  },
+  {
+    id: "c2",
+    name: "Weekend Escape Shelf",
+    vibe: "Fast, warm adventures",
+    promptSeed: "page-turning fantasy with heart",
+    memberIds: ["2", "4"],
+  },
+  {
+    id: "c3",
+    name: "Modern Classics Circle",
+    vibe: "Elegant discussion picks",
+    promptSeed: "literary classic with emotional depth",
+    memberIds: ["1", "3", "4"],
+  },
 ];
 
 export const MOCK_BOOKS: Book[] = [

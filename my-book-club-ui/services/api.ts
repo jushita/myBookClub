@@ -1,10 +1,5 @@
-import { Platform } from "react-native";
 import type { Book } from "../types";
-
-const defaultBaseUrl =
-  Platform.OS === "android" ? "http://10.0.2.2:4000" : "http://localhost:4000";
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || defaultBaseUrl;
+import { apiBaseUrl, requestJson } from "./http";
 
 type ApiBook = {
   id: string;
@@ -24,24 +19,8 @@ function toBook(apiBook: ApiBook): Book {
   };
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-    ...init,
-  });
-
-  if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
-}
-
 export async function fetchBooks(): Promise<Book[]> {
-  const data = await requestJson<{ books: ApiBook[] }>("/api/books");
+  const data = await requestJson<{ books: ApiBook[] }>(`${apiBaseUrl}/api/books`);
   return data.books.map(toBook);
 }
 
@@ -51,7 +30,7 @@ export async function createBook(input: {
   genre: string;
   description: string;
 }): Promise<Book> {
-  const data = await requestJson<{ book: ApiBook }>("/api/books", {
+  const data = await requestJson<{ book: ApiBook }>(`${apiBaseUrl}/api/books`, {
     method: "POST",
     body: JSON.stringify(input),
   });

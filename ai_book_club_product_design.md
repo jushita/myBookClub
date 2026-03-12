@@ -8,8 +8,9 @@ The AI Book Club app is a mobile-only application that helps book clubs discover
 Users can:
 - Join a book club group
 - Add books they enjoyed
-- Describe what kind of book they want next
+- Feature 1: Describe what kind of book they want next
 - Receive AI-assisted recommendations
+- Feature 2: Book club users can add their suggested books and then use a random wheel of fortnune to pick one of the book and store the rest of the suggestion for future use
 
 The system uses:
 - Embeddings + vector similarity search for recommendations
@@ -313,3 +314,4 @@ Embeddings + vector search | 2 days |
 Recommendation engine | 2 days |
 LLM integration | 1 day |
 Testing | 1 day |
+

@@ -2,6 +2,7 @@
   "expo": {
     "name": "myBookClub",
     "slug": "mybookclub",
+    "scheme": "mybookclub",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -13,9 +14,11 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.jushita.mybookclub"
     },
     "android": {
+      "package": "com.jushita.mybookclub",
       "adaptiveIcon": {
         "backgroundColor": "#F6F1E8"
       },
@@ -23,6 +26,9 @@
     },
     "web": {
       "bundler": "metro"
-    }
+    },
+    "plugins": [
+      "expo-dev-client"
+    ]
   }
 }

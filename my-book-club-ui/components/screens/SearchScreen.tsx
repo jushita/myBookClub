@@ -1,35 +1,22 @@
 import React from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
-import type { Book } from "../../types";
 import { appStyles } from "../../styles/appStyles";
+import type { SearchScreenActions, SearchScreenModel } from "../../types/screenModels";
 import { Card } from "../common/Card";
 
 type SearchScreenProps = {
-  searchTerm: string;
-  filteredSearchBooks: Book[];
-  selectedSearchBook: Book | null;
-  savedSearchBookIds: string[];
-  onSearchTermChange: (value: string) => void;
-  onSelectBook: (bookId: string) => void;
-  onToggleSaveBook: (book: Book) => void;
+  model: SearchScreenModel;
+  actions: SearchScreenActions;
 };
 
-export function SearchScreen({
-  searchTerm,
-  filteredSearchBooks,
-  selectedSearchBook,
-  savedSearchBookIds,
-  onSearchTermChange,
-  onSelectBook,
-  onToggleSaveBook,
-}: SearchScreenProps) {
+export function SearchScreen({ model, actions }: SearchScreenProps) {
   return (
     <View style={appStyles.stack}>
       <Card accent>
         <Text style={appStyles.sectionTitle}>Search books</Text>
         <TextInput
-          value={searchTerm}
-          onChangeText={onSearchTermChange}
+          value={model.searchTerm}
+          onChangeText={actions.onSearchTermChange}
           placeholder="Search by title, author, or genre"
           placeholderTextColor="rgba(255, 232, 244, 0.52)"
           style={appStyles.field}
@@ -39,11 +26,11 @@ export function SearchScreen({
       <Card>
         <Text style={appStyles.sectionTitle}>Results</Text>
         <View style={appStyles.candidateStack}>
-          {filteredSearchBooks.slice(0, 6).map((book) => (
+          {model.filteredSearchBooks.slice(0, 6).map((book) => (
             <Pressable
               key={book.id}
-              style={[appStyles.searchResultRow, selectedSearchBook?.id === book.id ? appStyles.searchResultRowActive : null]}
-              onPress={() => onSelectBook(book.id)}
+              style={[appStyles.searchResultRow, model.selectedSearchBook?.id === book.id ? appStyles.searchResultRowActive : null]}
+              onPress={() => actions.onSelectBook(book.id)}
             >
               <View style={appStyles.searchResultCopy}>
                 <Text style={appStyles.candidateTitle}>{book.title}</Text>
@@ -52,26 +39,26 @@ export function SearchScreen({
               <Text style={appStyles.searchResultChevron}>›</Text>
             </Pressable>
           ))}
-          {filteredSearchBooks.length === 0 ? <Text style={appStyles.bodyText}>No books matched that search.</Text> : null}
+          {model.filteredSearchBooks.length === 0 ? <Text style={appStyles.bodyText}>No books matched that search.</Text> : null}
         </View>
       </Card>
 
-      {selectedSearchBook ? (
+      {model.selectedSearchBook ? (
         <Card accent>
           <View style={appStyles.searchDetailHeader}>
             <View style={appStyles.searchDetailCopy}>
               <Text style={appStyles.sectionTitle}>Book details</Text>
-              <Text style={appStyles.clubName}>{selectedSearchBook.title}</Text>
-              <Text style={appStyles.bodyText}>{selectedSearchBook.author}</Text>
+              <Text style={appStyles.clubName}>{model.selectedSearchBook.title}</Text>
+              <Text style={appStyles.bodyText}>{model.selectedSearchBook.author}</Text>
             </View>
-            <Pressable style={appStyles.searchStarButton} onPress={() => onToggleSaveBook(selectedSearchBook)}>
+            <Pressable style={appStyles.searchStarButton} onPress={() => actions.onToggleSaveBook(model.selectedSearchBook!)}>
               <Text style={appStyles.searchStarIcon}>
-                {savedSearchBookIds.includes(selectedSearchBook.id) ? "★" : "☆"}
+                {model.savedSearchBookIds.includes(model.selectedSearchBook.id) ? "★" : "☆"}
               </Text>
             </Pressable>
           </View>
           <Text style={appStyles.searchSynopsisLabel}>Synopsis</Text>
-          <Text style={appStyles.bodyText}>{selectedSearchBook.note}</Text>
+          <Text style={appStyles.bodyText}>{model.selectedSearchBook.note}</Text>
         </Card>
       ) : null}
     </View>

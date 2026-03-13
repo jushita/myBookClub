@@ -1,10 +1,30 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
+import { User } from "../domain/entities/index.js";
 import { comparePassword, hashPassword, serializeUser, signToken } from "../lib/auth.js";
 import { createUser, findUserByEmail } from "../repositories/users.js";
 
+type SignupBody = {
+  name?: string;
+  email?: string;
+  password?: string;
+};
+
+type LoginBody = {
+  email?: string;
+  password?: string;
+};
+
+type SocialLoginBody = {
+  provider?: string;
+  email?: string;
+  name?: string;
+  providerUserId?: string;
+};
+
 export const authRouter = Router();
 
-authRouter.post("/signup", async (req, res) => {
+authRouter.post("/signup", async (req: Request<unknown, unknown, SignupBody>, res: Response) => {
   try {
     const { name, email, password } = req.body ?? {};
     const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -26,14 +46,16 @@ authRouter.post("/signup", async (req, res) => {
       return;
     }
 
-    const user = await createUser({
-      id: `u${Date.now()}`,
-      name: String(name).trim(),
-      email: normalizedEmail,
-      passwordHash: await hashPassword(String(password)),
-      provider: "email",
-      providerUserId: null,
-    });
+    const user = await createUser(
+      new User({
+        id: `u${Date.now()}`,
+        name: String(name).trim(),
+        email: normalizedEmail,
+        passwordHash: await hashPassword(String(password)),
+        provider: "email",
+        providerUserId: null,
+      })
+    );
 
     res.status(201).json({
       token: signToken(user),
@@ -44,7 +66,7 @@ authRouter.post("/signup", async (req, res) => {
   }
 });
 
-authRouter.post("/login", async (req, res) => {
+authRouter.post("/login", async (req: Request<unknown, unknown, LoginBody>, res: Response) => {
   try {
     const { email, password } = req.body ?? {};
     const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -71,7 +93,7 @@ authRouter.post("/login", async (req, res) => {
   }
 });
 
-authRouter.post("/social", async (req, res) => {
+authRouter.post("/social", async (req: Request<unknown, unknown, SocialLoginBody>, res: Response) => {
   try {
     const { provider, email, name, providerUserId } = req.body ?? {};
     const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -84,14 +106,16 @@ authRouter.post("/social", async (req, res) => {
     let user = await findUserByEmail(normalizedEmail);
 
     if (!user) {
-      user = await createUser({
-        id: `u${Date.now()}`,
-        name: String(name).trim(),
-        email: normalizedEmail,
-        provider: "google",
-        providerUserId: providerUserId ? String(providerUserId) : null,
-        passwordHash: null,
-      });
+      user = await createUser(
+        new User({
+          id: `u${Date.now()}`,
+          name: String(name).trim(),
+          email: normalizedEmail,
+          provider: "google",
+          providerUserId: providerUserId ? String(providerUserId) : null,
+          passwordHash: null,
+        })
+      );
     }
 
     res.json({

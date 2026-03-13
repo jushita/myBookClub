@@ -73,6 +73,9 @@ export const appStyles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  flexButton: {
+    flex: 1,
+  },
   pickModeButton: {
     flex: 1,
     backgroundColor: "rgba(255, 255, 255, 0.12)",

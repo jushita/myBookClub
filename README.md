@@ -30,9 +30,9 @@ The backend API project now lives in `my-book-club-api/`.
 ### Development startup
 
 1. Start the API:
-   `cd my-book-club-api && set -a && source .env && set +a && npm run dev`
+   `cd my-book-club-api && npm run dev`
 2. Start Metro in a second terminal:
-   `cd my-book-club-ui && npm run start -- --clear`
+   `cd my-book-club-ui && npm run start:clear`
 3. Open the installed `myBookClub` app in the iOS simulator
 
 ### Google auth development flow
@@ -40,16 +40,26 @@ The backend API project now lives in `my-book-club-api/`.
 Google sign-in will not work correctly in Expo Go for this project. Use a native development build.
 
 1. Install the iOS development build into the simulator:
-   `cd my-book-club-ui && npx expo run:ios`
+   `cd my-book-club-ui && npm run build`
 2. After the app is installed, start Metro:
-   `cd my-book-club-ui && npm run start -- --clear`
+   `cd my-book-club-ui && npm run start:clear`
 3. Open the `myBookClub` app in the simulator, not Expo Go
 
 ### Notes
 
 - If you run the app on a physical device, set `EXPO_PUBLIC_API_BASE_URL=http://YOUR_MAC_IP:4000`
 - Google auth expects iOS, Android, and web client IDs in `my-book-club-ui/.env`
-- The API currently needs env vars loaded in-shell before `npm run dev`
+
+### Useful UI commands
+
+- `cd my-book-club-ui && npm run build`
+  Builds and installs the iOS development app in Simulator
+- `cd my-book-club-ui && npm run build:ios`
+  Same as `npm run build`
+- `cd my-book-club-ui && npm run build:android`
+  Builds and installs the Android development app
+- `cd my-book-club-ui && npm run start:clear`
+  Starts Metro with a cleared cache
 
 ## Project structure
 

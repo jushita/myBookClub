@@ -1,14 +1,17 @@
 export type ClubMember = {
   id: string;
+  userId?: string;
   name: string;
+  role?: "owner" | "admin" | "member";
 };
 
 export type Club = {
   id: string;
   name: string;
   vibe: string;
+  description?: string;
   promptSeed: string;
-  memberIds: string[];
+  memberIds?: string[];
 };
 
 export type AuthProvider = "google" | "email";

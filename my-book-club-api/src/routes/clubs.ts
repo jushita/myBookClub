@@ -4,12 +4,19 @@ import { Book, Club, ClubBook, ClubMember } from "../domain/entities/index.js";
 import { listBooksByIds, createBook, findBookById } from "../repositories/books.js";
 import {
   addClubBook,
+  findCurrentClubBook,
   removeClubBook,
   findClubBook,
   listClubBooksByClubAndUser,
   listClubBooksByClubId,
+  promoteClubBookToCurrent,
   updateClubBook,
 } from "../repositories/clubBooks.js";
+import {
+  findDiscussionQuestionsForClubBook,
+  upsertDiscussionQuestionsForClubBook,
+} from "../repositories/clubDiscussionQuestions.js";
+import { findClubInsight, upsertClubInsight } from "../repositories/clubInsights.js";
 import {
   addClubMember,
   findClubMember,
@@ -26,6 +33,9 @@ import {
   updateClub,
 } from "../repositories/clubs.js";
 import { findUserById, listUsersByIds } from "../repositories/users.js";
+import { generateClubTasteInsight, generateDiscussionQuestions } from "../services/bookAssistant.js";
+
+const CLUB_INSIGHT_REFRESH_MS = 1000 * 60 * 60 * 24;
 
 type CreateClubBody = {
   name?: string;
@@ -53,6 +63,7 @@ type AddClubBookBody = {
   genre?: string;
   description?: string;
   synopsis?: string;
+  coverImageUrl?: string;
   isbn13?: string;
   status?: "saved" | "shortlisted" | "current" | "finished" | "removed";
   notes?: string;
@@ -74,6 +85,94 @@ function serializeClubBooksResponse(clubBooks: ClubBook[], books: Book[]) {
     ...clubBook.toJSON(),
     book: booksById.get(clubBook.bookId)?.toJSON() ?? null,
   }));
+}
+
+function normalizeTopTerms(values: string[]): string[] {
+  const counts = new Map<string, number>();
+
+  for (const value of values.map((item) => item.trim()).filter(Boolean)) {
+    const normalized = value.toLowerCase();
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([value]) => value);
+}
+
+function buildShelfFingerprint(clubBooks: ClubBook[], booksById: Map<string, Book>): string {
+  return [...clubBooks]
+    .sort((left, right) => left.bookId.localeCompare(right.bookId) || left.userId.localeCompare(right.userId))
+    .map((entry) => {
+      const book = booksById.get(entry.bookId);
+      return [
+        entry.bookId,
+        entry.status,
+        entry.isCurrentRead ? "current" : "not-current",
+        book?.genre || "",
+        book?.author || "",
+      ].join(":");
+    })
+    .join("|");
+}
+
+async function getOrCreateCurrentDiscussionQuestions(clubId: string) {
+  const club = await findClubById(clubId);
+
+  if (!club) {
+    throw new Error("club not found");
+  }
+
+  const currentClubBook = await findCurrentClubBook(club.id);
+
+  if (!currentClubBook) {
+    return {
+      club,
+      currentClubBook: null,
+      record: null,
+      book: null,
+    };
+  }
+
+  const book = await findBookById(currentClubBook.bookId);
+
+  if (!book) {
+    throw new Error("current club book not found");
+  }
+
+  const existingRecord = await findDiscussionQuestionsForClubBook(club.id, book.id);
+
+  if (existingRecord) {
+    return {
+      club,
+      currentClubBook,
+      record: existingRecord,
+      book,
+    };
+  }
+
+  const questions = await generateDiscussionQuestions({
+    title: book.title,
+    author: book.author,
+    description: book.description || book.synopsis,
+    clubName: club.name,
+    clubVibe: club.vibe,
+  });
+
+  const record = await upsertDiscussionQuestionsForClubBook({
+    id: `cdq${Date.now()}`,
+    clubId: club.id,
+    bookId: book.id,
+    questions,
+  });
+
+  return {
+    club,
+    currentClubBook,
+    record,
+    book,
+  };
 }
 
 export const clubsRouter = Router();
@@ -326,9 +425,10 @@ clubsRouter.get("/:clubId/books", async (req: Request, res: Response) => {
     }
 
     const userId = String(req.query.userId || "").trim();
+    const status = String(req.query.status || "").trim() as ClubBook["status"] | "";
     const clubBooks = userId
-      ? await listClubBooksByClubAndUser(club.id, userId)
-      : await listClubBooksByClubId(club.id);
+      ? await listClubBooksByClubAndUser(club.id, userId, status ? { status } : {})
+      : await listClubBooksByClubId(club.id, status ? { status } : {});
 
     const books = await listBooksByIds([...new Set(clubBooks.map((clubBook) => clubBook.bookId))]);
 
@@ -337,6 +437,119 @@ clubsRouter.get("/:clubId/books", async (req: Request, res: Response) => {
     });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "could not load club books" });
+  }
+});
+
+clubsRouter.get("/:clubId/discussion/current", async (req: Request, res: Response) => {
+  try {
+    const result = await getOrCreateCurrentDiscussionQuestions(String(req.params.clubId));
+
+    if (!result.currentClubBook || !result.record || !result.book) {
+      res.json({
+        currentBookId: null,
+        questions: [],
+      });
+      return;
+    }
+
+    res.json({
+      currentBookId: result.book.id,
+      questions: result.record.questions,
+      book: result.book.toJSON(),
+      generatedAt: result.record.updatedAt,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "club not found") {
+      res.status(404).json({ error: "club not found" });
+      return;
+    }
+
+    res.status(500).json({ error: error instanceof Error ? error.message : "could not load discussion questions" });
+  }
+});
+
+clubsRouter.get("/:clubId/insights", async (req: Request, res: Response) => {
+  try {
+    const club = await findClubById(String(req.params.clubId));
+
+    if (!club) {
+      res.status(404).json({ error: "club not found" });
+      return;
+    }
+
+    const [members, clubBooks] = await Promise.all([
+      listMembersByClubId(club.id),
+      listClubBooksByClubId(club.id),
+    ]);
+    const books = await listBooksByIds([...new Set(clubBooks.map((clubBook) => clubBook.bookId))]);
+    const booksById = new Map(books.map((book) => [book.id, book]));
+    const shelfFingerprint = buildShelfFingerprint(clubBooks, booksById);
+    const cachedInsight = await findClubInsight(club.id);
+    const cachedInsightLooksBroken =
+      cachedInsight?.headline.includes("[object Object]") ||
+      cachedInsight?.summary.includes("[object Object]") ||
+      cachedInsight?.signals.some((signal) => signal.includes("[object Object]"));
+    const cachedInsightIsFresh =
+      cachedInsight && Date.now() - cachedInsight.updatedAt.getTime() < CLUB_INSIGHT_REFRESH_MS;
+
+    if (cachedInsight && !cachedInsightLooksBroken && cachedInsight.shelfFingerprint === shelfFingerprint && cachedInsightIsFresh) {
+      res.json({
+        insight: {
+          headline: cachedInsight.headline,
+          summary: cachedInsight.summary,
+          signals: cachedInsight.signals,
+          source: cachedInsight.source,
+        },
+      });
+      return;
+    }
+
+    const currentEntry = clubBooks.find((entry) => entry.isCurrentRead || entry.status === "current") ?? null;
+    const currentBook = currentEntry ? booksById.get(currentEntry.bookId) ?? null : null;
+    const savedBooks = clubBooks
+      .filter((entry) => entry.status !== "removed")
+      .map((entry) => booksById.get(entry.bookId))
+      .filter((book): book is Book => Boolean(book));
+    const finishedBooks = clubBooks
+      .filter((entry) => entry.status === "finished")
+      .map((entry) => booksById.get(entry.bookId))
+      .filter((book): book is Book => Boolean(book));
+
+    const topGenres = normalizeTopTerms(
+      savedBooks.flatMap((book) =>
+        book.genre
+          .split(/[,&/]/)
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    );
+    const topAuthors = normalizeTopTerms(savedBooks.map((book) => book.author));
+
+    const insight = await generateClubTasteInsight({
+      clubName: club.name,
+      clubVibe: club.vibe,
+      memberCount: members.length,
+      currentReadTitle: currentBook?.title,
+      currentReadAuthor: currentBook?.author,
+      savedTitles: savedBooks.slice(0, 8).map((book) => book.title),
+      finishedTitles: finishedBooks.slice(0, 8).map((book) => book.title),
+      topGenres,
+      topAuthors,
+    });
+
+    await upsertClubInsight({
+      id: cachedInsight?.id ?? `ci${Date.now()}`,
+      clubId: club.id,
+      shelfFingerprint,
+      headline: insight.headline,
+      summary: insight.summary,
+      signals: insight.signals,
+      source: insight.source,
+    });
+
+    res.json({ insight });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "could not load club insights" });
   }
 });
 
@@ -373,7 +586,7 @@ clubsRouter.post("/:clubId/books", async (req: Request<{ clubId: string }, unkno
     let book = req.body?.bookId ? await findBookById(String(req.body.bookId)) : null;
 
     if (!book) {
-      const { title, author, genre = "", description = "", synopsis = "", isbn13 } = req.body ?? {};
+      const { title, author, genre = "", description = "", synopsis = "", coverImageUrl = "", isbn13 } = req.body ?? {};
 
       if (!title || !author) {
         res.status(400).json({ error: "bookId or title and author are required" });
@@ -382,23 +595,32 @@ clubsRouter.post("/:clubId/books", async (req: Request<{ clubId: string }, unkno
 
       book = await createBook(
         new Book({
-          id: `b${Date.now()}`,
+          id: req.body?.bookId ? String(req.body.bookId) : `b${Date.now()}`,
           title: String(title),
           author: String(author),
           genre: String(genre),
           description: String(description),
           synopsis: String(synopsis || description),
+          coverImageUrl: String(coverImageUrl || "") || null,
           isbn13: isbn13 ? String(isbn13) : null,
         })
       );
     }
 
+    const shouldPromoteToCurrent = Boolean(req.body?.isCurrentRead) || req.body?.status === "current";
     const existingClubBook = await findClubBook(club.id, user.id, book.id);
 
     if (existingClubBook) {
+      const responseClubBook = shouldPromoteToCurrent
+        ? await promoteClubBookToCurrent(club.id, user.id, book.id, {
+            notes: req.body?.notes !== undefined ? String(req.body.notes || "") : undefined,
+            rating: req.body?.rating ?? undefined,
+          })
+        : existingClubBook;
+
       res.json({
         clubBook: {
-          ...existingClubBook.toJSON(),
+          ...(responseClubBook ?? existingClubBook).toJSON(),
           book: book.toJSON(),
         },
       });
@@ -408,7 +630,7 @@ clubsRouter.post("/:clubId/books", async (req: Request<{ clubId: string }, unkno
     let clubBook: ClubBook;
 
     try {
-      clubBook = await addClubBook(
+      const createdClubBook = await addClubBook(
         new ClubBook({
           id: `cb${Date.now()}`,
           clubId: club.id,
@@ -420,6 +642,13 @@ clubsRouter.post("/:clubId/books", async (req: Request<{ clubId: string }, unkno
           isCurrentRead: Boolean(req.body?.isCurrentRead),
         })
       );
+
+      clubBook = shouldPromoteToCurrent
+        ? ((await promoteClubBookToCurrent(club.id, user.id, book.id, {
+            notes: req.body?.notes !== undefined ? String(req.body.notes || "") : undefined,
+            rating: req.body?.rating ?? undefined,
+          })) ?? createdClubBook)
+        : createdClubBook;
     } catch (error) {
       const isDuplicateKeyError =
         typeof error === "object" &&
@@ -437,9 +666,16 @@ clubsRouter.post("/:clubId/books", async (req: Request<{ clubId: string }, unkno
         throw error;
       }
 
+      const responseClubBook = shouldPromoteToCurrent
+        ? await promoteClubBookToCurrent(club.id, user.id, book.id, {
+            notes: req.body?.notes !== undefined ? String(req.body.notes || "") : undefined,
+            rating: req.body?.rating ?? undefined,
+          })
+        : duplicateClubBook;
+
       res.json({
         clubBook: {
-          ...duplicateClubBook.toJSON(),
+          ...(responseClubBook ?? duplicateClubBook).toJSON(),
           book: book.toJSON(),
         },
       });
@@ -490,17 +726,22 @@ clubsRouter.patch(
     res: Response
   ) => {
     try {
-      const clubBook = await updateClubBook(
-        String(req.params.clubId),
-        String(req.params.userId),
-        String(req.params.bookId),
-        {
-          status: req.body?.status,
-          notes: req.body?.notes,
-          rating: req.body?.rating,
-          isCurrentRead: req.body?.isCurrentRead,
-        }
-      );
+      const clubId = String(req.params.clubId);
+      const userId = String(req.params.userId);
+      const bookId = String(req.params.bookId);
+      const shouldPromoteToCurrent = req.body?.isCurrentRead === true || req.body?.status === "current";
+
+      const clubBook = shouldPromoteToCurrent
+        ? await promoteClubBookToCurrent(clubId, userId, bookId, {
+            notes: req.body?.notes,
+            rating: req.body?.rating,
+          })
+        : await updateClubBook(clubId, userId, bookId, {
+            status: req.body?.status,
+            notes: req.body?.notes,
+            rating: req.body?.rating,
+            isCurrentRead: req.body?.isCurrentRead,
+          });
 
       if (!clubBook) {
         res.status(404).json({ error: "club book not found" });

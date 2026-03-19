@@ -1,8 +1,14 @@
 import React from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, Text, TextInput, View } from "react-native";
+import { useActionFeedback } from "../../hooks/useActionFeedback";
 import { appStyles } from "../../styles/appStyles";
 import type { SearchScreenActions, SearchScreenModel } from "../../types/screenModels";
+import { BookCard } from "../BookCard";
 import { Card } from "../common/Card";
+
+function getBookLookupKey(title: string, author: string) {
+  return `${title.trim().toLowerCase()}::${author.trim().toLowerCase()}`;
+}
 
 type SearchScreenProps = {
   model: SearchScreenModel;
@@ -10,10 +16,19 @@ type SearchScreenProps = {
 };
 
 export function SearchScreen({ model, actions }: SearchScreenProps) {
+  const { labels, runWithFeedback } = useActionFeedback();
+  const selectedBookIsSaved = model.selectedSearchBook
+    ? model.savedSearchBookIds.includes(model.selectedSearchBook.id) ||
+      model.savedSearchBookKeys.includes(getBookLookupKey(model.selectedSearchBook.title, model.selectedSearchBook.author))
+    : false;
+  const selectedBookIsPicked = model.selectedSearchBook
+    ? model.currentPickedBookId === model.selectedSearchBook.id ||
+      model.currentPickedBookKeys.includes(getBookLookupKey(model.selectedSearchBook.title, model.selectedSearchBook.author))
+    : false;
+
   return (
     <View style={appStyles.stack}>
       <Card accent>
-        <Text style={appStyles.sectionTitle}>Search books</Text>
         <TextInput
           value={model.searchTerm}
           onChangeText={actions.onSearchTermChange}
@@ -24,12 +39,15 @@ export function SearchScreen({ model, actions }: SearchScreenProps) {
       </Card>
 
       <Card>
-        <Text style={appStyles.sectionTitle}>Results</Text>
         <View style={appStyles.candidateStack}>
           {model.filteredSearchBooks.slice(0, 6).map((book) => (
             <Pressable
               key={book.id}
-              style={[appStyles.searchResultRow, model.selectedSearchBook?.id === book.id ? appStyles.searchResultRowActive : null]}
+              style={({ pressed }) => [
+                appStyles.searchResultRow,
+                model.selectedSearchBook?.id === book.id ? appStyles.searchResultRowActive : null,
+                pressed ? appStyles.chipPressed : null,
+              ]}
               onPress={() => actions.onSelectBook(book.id)}
             >
               <View style={appStyles.searchResultCopy}>
@@ -43,24 +61,58 @@ export function SearchScreen({ model, actions }: SearchScreenProps) {
         </View>
       </Card>
 
-      {model.selectedSearchBook ? (
-        <Card accent>
-          <View style={appStyles.searchDetailHeader}>
-            <View style={appStyles.searchDetailCopy}>
-              <Text style={appStyles.sectionTitle}>Book details</Text>
-              <Text style={appStyles.clubName}>{model.selectedSearchBook.title}</Text>
-              <Text style={appStyles.bodyText}>{model.selectedSearchBook.author}</Text>
-            </View>
-            <Pressable style={appStyles.searchStarButton} onPress={() => actions.onToggleSaveBook(model.selectedSearchBook!)}>
-              <Text style={appStyles.searchStarIcon}>
-                {model.savedSearchBookIds.includes(model.selectedSearchBook.id) ? "★" : "☆"}
-              </Text>
-            </Pressable>
+      <Modal
+        visible={Boolean(model.selectedSearchBook)}
+        animationType="fade"
+        transparent
+        onRequestClose={actions.onCloseBookDetails}
+      >
+        <View style={appStyles.searchModalBackdrop}>
+          <View style={appStyles.searchModalCard}>
+            {model.selectedSearchBook ? (
+              <>
+                <View style={appStyles.searchModalTopRow}>
+                  <Text style={appStyles.sectionTitle}>Book details</Text>
+                  <Pressable
+                    style={({ pressed }) => [
+                      appStyles.searchModalCloseButton,
+                      pressed ? appStyles.secondaryButtonPressed : null,
+                    ]}
+                    onPress={actions.onCloseBookDetails}
+                  >
+                    <Text style={appStyles.searchModalCloseText}>Close</Text>
+                  </Pressable>
+                </View>
+
+                <BookCard
+                  book={{
+                    ...model.selectedSearchBook,
+                    genre: selectedBookIsSaved ? `${model.selectedSearchBook.genre} · Saved` : model.selectedSearchBook.genre,
+                  }}
+                  actionLabel={labels["search-want"] || "Want to Read"}
+                  onActionPress={() =>
+                    void runWithFeedback("search-want", "Added", () =>
+                      actions.onAddSearchBookToWantToRead(model.selectedSearchBook!)
+                    )
+                  }
+                  secondaryActionLabel={labels["search-finished"] || "Finished"}
+                  onSecondaryActionPress={() =>
+                    void runWithFeedback("search-finished", "Finished", () =>
+                      actions.onMarkSearchBookFinished(model.selectedSearchBook!)
+                    )
+                  }
+                  tertiaryActionLabel={labels["search-pick"] || (selectedBookIsPicked ? "Picked" : "Pick For Club")}
+                  onTertiaryActionPress={() =>
+                    void runWithFeedback("search-pick", selectedBookIsPicked ? "Cleared" : "Picked", () =>
+                      actions.onPickSearchBookForClub(model.selectedSearchBook!)
+                    )
+                  }
+                />
+              </>
+            ) : null}
           </View>
-          <Text style={appStyles.searchSynopsisLabel}>Synopsis</Text>
-          <Text style={appStyles.bodyText}>{model.selectedSearchBook.note}</Text>
-        </Card>
-      ) : null}
+        </View>
+      </Modal>
     </View>
   );
 }

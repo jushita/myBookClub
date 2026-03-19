@@ -11,7 +11,14 @@ type NavButtonProps = {
 
 export function NavButton({ icon, label, active, onPress }: NavButtonProps) {
   return (
-    <Pressable style={[appStyles.navButton, active ? appStyles.navButtonActive : null]} onPress={onPress}>
+    <Pressable
+      style={({ pressed }) => [
+        appStyles.navButton,
+        active ? appStyles.navButtonActive : null,
+        pressed ? appStyles.navButtonPressed : null,
+      ]}
+      onPress={onPress}
+    >
       <Text style={[appStyles.navIcon, active ? appStyles.navIconActive : null]}>{icon}</Text>
       <Text style={[appStyles.navLabel, active ? appStyles.navLabelActive : null]}>{label}</Text>
     </Pressable>

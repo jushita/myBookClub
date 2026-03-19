@@ -24,10 +24,25 @@ export function GuestAccessCard({
       <Text style={appStyles.clubName}>{title}</Text>
       <Text style={appStyles.bodyText}>{description}</Text>
       <View style={appStyles.authCtaRow}>
-        <Pressable style={[appStyles.neuButton, appStyles.primaryButton, appStyles.authCtaButton]} onPress={onSignIn}>
+        <Pressable
+          style={({ pressed }) => [
+            appStyles.neuButton,
+            appStyles.primaryButton,
+            appStyles.authCtaButton,
+            pressed ? appStyles.primaryButtonPressed : null,
+          ]}
+          onPress={onSignIn}
+        >
           <Text style={appStyles.primaryButtonText}>Sign in</Text>
         </Pressable>
-        <Pressable style={[appStyles.secondaryButton, appStyles.authCtaButton]} onPress={onSignUp}>
+        <Pressable
+          style={({ pressed }) => [
+            appStyles.secondaryButton,
+            appStyles.authCtaButton,
+            pressed ? appStyles.secondaryButtonPressed : null,
+          ]}
+          onPress={onSignUp}
+        >
           <Text style={appStyles.secondaryButtonText}>Sign up</Text>
         </Pressable>
       </View>

@@ -4,6 +4,7 @@ import type { Express } from "express";
 import { authRouter } from "./routes/auth.js";
 import { booksRouter } from "./routes/books.js";
 import { clubsRouter } from "./routes/clubs.js";
+import { recommendationsRouter } from "./routes/recommendations.js";
 
 export function createApp(): Express {
   const app = express();
@@ -25,6 +26,7 @@ export function createApp(): Express {
         "/api/auth/social",
         "/api/books",
         "/api/books/:id",
+        "/api/recommendations/books",
         "/api/clubs",
         "/api/clubs/:id",
         "/api/clubs/:id/members",
@@ -35,6 +37,7 @@ export function createApp(): Express {
 
   app.use("/api/auth", authRouter);
   app.use("/api/books", booksRouter);
+  app.use("/api/recommendations", recommendationsRouter);
   app.use("/api/clubs", clubsRouter);
 
   return app;

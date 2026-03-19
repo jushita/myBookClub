@@ -12,14 +12,17 @@ export function usePickNext(
   favoriteBooks: Book[],
   authUser: unknown,
   aiRecommendations: Recommendation[],
-  wheelEngine: WheelEngine
+  wheelEngine: WheelEngine,
+  onSearchBooks?: (query: string) => Promise<Book[]>
 ) {
   const [pickMode, setPickMode] = useState<PickMode>("ai");
   const [aiPickerPrompt, setAiPickerPrompt] = useState("");
   const [aiPickerGenerated, setAiPickerGenerated] = useState(false);
   const [wheelBookInput, setWheelBookInput] = useState("");
-  const [wheelBooks, setWheelBooks] = useState<string[]>([]);
-  const [wheelResult, setWheelResult] = useState<string | null>(null);
+  const [wheelBooks, setWheelBooks] = useState<Book[]>([]);
+  const [wheelSearchResults, setWheelSearchResults] = useState<Book[]>([]);
+  const [selectedWheelBookId, setSelectedWheelBookId] = useState<string | null>(null);
+  const [wheelResult, setWheelResult] = useState<Book | null>(null);
   const [wheelWinnerIndex, setWheelWinnerIndex] = useState<number | null>(null);
   const [wheelSpinTarget, setWheelSpinTarget] = useState(360 * 5);
   const [wheelSpinning, setWheelSpinning] = useState(false);
@@ -40,8 +43,13 @@ export function usePickNext(
     inputRange: [0, 1],
     outputRange: ["0deg", `${wheelSpinTarget}deg`],
   });
-  const wheelSlices = useMemo(() => wheelEngine.buildSlices(wheelBooks), [wheelBooks, wheelEngine]);
+  const wheelBookTitles = useMemo(() => wheelBooks.map((book) => book.title), [wheelBooks]);
+  const wheelSlices = useMemo(() => wheelEngine.buildSlices(wheelBookTitles), [wheelBookTitles, wheelEngine]);
   const defaultWheelSlices = useMemo(() => wheelEngine.buildDefaultSlices(), [wheelEngine]);
+  const selectedWheelBook = useMemo(
+    () => wheelSearchResults.find((book) => book.id === selectedWheelBookId) ?? null,
+    [selectedWheelBookId, wheelSearchResults]
+  );
 
   useEffect(() => {
     if (!selectedClub) {
@@ -53,12 +61,54 @@ export function usePickNext(
     setRandomizerRunCount(0);
     setWheelBookInput("");
     setWheelBooks([]);
+    setWheelSearchResults([]);
+    setSelectedWheelBookId(null);
     setWheelResult(null);
     setWheelWinnerIndex(null);
     setWheelSpinTarget(360 * 5);
     wheelSpin.stopAnimation();
     wheelSpin.setValue(0);
   }, [selectedClub, wheelSpin]);
+
+  useEffect(() => {
+    const trimmed = wheelBookInput.trim();
+    if (!trimmed) {
+      setWheelSearchResults([]);
+      setSelectedWheelBookId(null);
+      return;
+    }
+
+    let ignore = false;
+
+    const runSearch = async () => {
+      try {
+        const books = await onSearchBooks?.(trimmed);
+        if (ignore) {
+          return;
+        }
+
+        setWheelSearchResults(books ?? []);
+        setSelectedWheelBookId((current) => {
+          if (!current) {
+            return null;
+          }
+
+          return (books ?? []).some((book) => book.id === current) ? current : null;
+        });
+      } catch {
+        if (!ignore) {
+          setWheelSearchResults([]);
+          setSelectedWheelBookId(null);
+        }
+      }
+    };
+
+    void runSearch();
+
+    return () => {
+      ignore = true;
+    };
+  }, [onSearchBooks, wheelBookInput]);
 
   const generateAiPick = () => {
     setAiPickerGenerated(true);
@@ -81,10 +131,8 @@ export function usePickNext(
   };
 
   const addWheelBook = () => {
-    const trimmed = wheelBookInput.trim();
-
-    if (!trimmed) {
-      Alert.alert("Book name required", "Enter a book title to add it to the wheel.");
+    if (!wheelBookInput.trim()) {
+      Alert.alert("Book search required", "Search for a book and select a result to add it to the wheel.");
       return;
     }
 
@@ -93,24 +141,31 @@ export function usePickNext(
       return;
     }
 
-    if (wheelBooks.some((book) => book.toLowerCase() === trimmed.toLowerCase())) {
+    if (!selectedWheelBook) {
+      Alert.alert("Select a book", "Tap one of the search results before adding it to the wheel.");
+      return;
+    }
+
+    if (wheelBooks.some((book) => book.id === selectedWheelBook.id)) {
       Alert.alert("Already added", "That book is already on the wheel.");
       return;
     }
 
-    setWheelBooks((current) => [...current, trimmed]);
+    setWheelBooks((current) => [...current, selectedWheelBook]);
     setWheelBookInput("");
+    setWheelSearchResults([]);
+    setSelectedWheelBookId(null);
     setWheelResult(null);
     setWheelWinnerIndex(null);
   };
 
-  const removeWheelBook = (bookToRemove: string) => {
+  const removeWheelBook = (bookIdToRemove: string) => {
     if (wheelSpinning) {
       return;
     }
 
-    setWheelBooks((current) => current.filter((book) => book !== bookToRemove));
-    setWheelResult((current) => (current === bookToRemove ? null : current));
+    setWheelBooks((current) => current.filter((book) => book.id !== bookIdToRemove));
+    setWheelResult((current) => (current?.id === bookIdToRemove ? null : current));
     setWheelWinnerIndex(null);
   };
 
@@ -119,7 +174,7 @@ export function usePickNext(
       return;
     }
 
-    const { winningBook, winningIndex, spinTarget } = wheelEngine.calculateSpinResult(wheelBooks);
+    const { winningIndex, spinTarget } = wheelEngine.calculateSpinResult(wheelBookTitles);
 
     setWheelSpinning(true);
     setWheelResult(null);
@@ -139,7 +194,7 @@ export function usePickNext(
       }
 
       setWheelWinnerIndex(winningIndex);
-      setWheelResult(winningBook);
+      setWheelResult(wheelBooks[winningIndex] ?? null);
       setWheelSpinning(false);
     });
   };
@@ -150,6 +205,8 @@ export function usePickNext(
     aiPickerGenerated,
     wheelBookInput,
     wheelBooks,
+    wheelSearchResults,
+    selectedWheelBookId,
     wheelResult,
     wheelWinnerIndex,
     wheelSpinning,
@@ -163,6 +220,7 @@ export function usePickNext(
     aiPreviewRecommendations: aiRecommendations,
     setPickMode,
     setWheelBookInput,
+    setSelectedWheelBookId,
     updateAiPrompt,
     generateAiPick,
     runRandomizer,

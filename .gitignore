@@ -13,3 +13,6 @@ my-book-club-ui/web-build/
 
 my-book-club-api/dist/
 my-book-club-api/coverage/
+
+data/openlibrary/
+data/goodbooks/

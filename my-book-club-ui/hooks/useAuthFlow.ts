@@ -6,6 +6,15 @@ import type { AuthUser } from "../types";
 
 type EmailAuthMode = "signup" | "login";
 
+const DEV_AUTH_USER: AuthUser = {
+  id: "u_seed_jushita",
+  name: "Jushita Rahman",
+  email: "jushita@example.com",
+  provider: "email",
+};
+
+const DEV_AUTH_TOKEN = "dev-auth-token";
+
 export function useAuthFlow() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -37,6 +46,37 @@ export function useAuthFlow() {
 
     void finishGoogleSignIn(accessToken);
   }, [googleResponse]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const bootstrapDevAuth = async () => {
+      try {
+        const payload = await loginWithSocial({
+          provider: "google",
+          email: DEV_AUTH_USER.email,
+          name: DEV_AUTH_USER.name,
+          providerUserId: DEV_AUTH_USER.id,
+        });
+
+        if (!ignore) {
+          setAuthUser(payload.user);
+          setAuthToken(payload.token);
+        }
+      } catch {
+        if (!ignore) {
+          setAuthUser(DEV_AUTH_USER);
+          setAuthToken(DEV_AUTH_TOKEN);
+        }
+      }
+    };
+
+    void bootstrapDevAuth();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const finishEmailAuth = async () => {
     const trimmedName = name.trim();

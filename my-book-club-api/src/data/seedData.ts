@@ -30,6 +30,7 @@ type SeedBook = {
   description: string;
   synopsis: string;
   isbn13: string;
+  coverImageUrl: string;
   embedding: number[];
 };
 
@@ -120,6 +121,7 @@ export const seedBooks: SeedBook[] = [
     description: "A contemporary mystery with a cozy tone and brisk pacing.",
     synopsis: "Molly Gray becomes entangled in a murder investigation inside the luxury hotel where she works.",
     isbn13: "9780593356159",
+    coverImageUrl: "https://covers.openlibrary.org/b/isbn/9780593356159-L.jpg",
     embedding: [0.12, 0.83, 0.31, 0.55],
   },
   {
@@ -130,6 +132,7 @@ export const seedBooks: SeedBook[] = [
     description: "A sharp psychological thriller with unreliable narration.",
     synopsis: "A missing-wife case unravels a poisonous marriage and a media circus built on lies.",
     isbn13: "9780307588371",
+    coverImageUrl: "https://covers.openlibrary.org/b/isbn/9780307588371-L.jpg",
     embedding: [0.91, 0.14, 0.63, 0.4],
   },
   {
@@ -140,6 +143,7 @@ export const seedBooks: SeedBook[] = [
     description: "A classic possession novel with psychological and supernatural dread.",
     synopsis: "A child’s violent transformation drives two priests into a brutal confrontation with evil.",
     isbn13: "9780061007224",
+    coverImageUrl: "https://covers.openlibrary.org/b/isbn/9780061007224-L.jpg",
     embedding: [0.77, 0.22, 0.88, 0.18],
   },
   {
@@ -150,6 +154,7 @@ export const seedBooks: SeedBook[] = [
     description: "A bleak family horror novel with cultish dread.",
     synopsis: "A man’s buried family history resurfaces with terrifying consequences for his wife and children.",
     isbn13: "9781476783734",
+    coverImageUrl: "https://covers.openlibrary.org/b/isbn/9781476783734-L.jpg",
     embedding: [0.69, 0.35, 0.84, 0.27],
   },
   {
@@ -160,6 +165,7 @@ export const seedBooks: SeedBook[] = [
     description: "A warm, character-driven fantasy with found-family energy.",
     synopsis: "A caseworker visits an extraordinary orphanage and finds his life transformed by the children there.",
     isbn13: "9781250217288",
+    coverImageUrl: "https://covers.openlibrary.org/b/isbn/9781250217288-L.jpg",
     embedding: [0.18, 0.91, 0.22, 0.79],
   },
   {
@@ -170,6 +176,7 @@ export const seedBooks: SeedBook[] = [
     description: "A gothic suspense novel with atmosphere and obsession.",
     synopsis: "A young bride enters Manderley and finds herself haunted by the lingering power of Rebecca.",
     isbn13: "9780380730407",
+    coverImageUrl: "https://covers.openlibrary.org/b/isbn/9780380730407-L.jpg",
     embedding: [0.58, 0.41, 0.72, 0.46],
   },
 ];

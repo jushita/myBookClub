@@ -1,10 +1,13 @@
 import * as WebBrowser from "expo-web-browser";
 import { Alert } from "react-native";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MOCK_BOOKS, MOCK_RECOMMENDATIONS } from "../data/mockData";
 import { RecommendationEngine } from "../domain/RecommendationEngine";
 import { WheelEngine } from "../domain/WheelEngine";
-import { saveBookToClub } from "../services/clubs";
+import { fetchBooks, mergeDetailedBook } from "../services/api";
+import { fetchRecommendedBooks } from "../services/recommendations";
+import { fetchClubInsight, fetchCurrentClubDiscussionQuestions } from "../services/clubs";
+import type { ClubInsight } from "../services/clubs";
 import { useAppNavigation } from "./useAppNavigation";
 import { useAuthFlow } from "./useAuthFlow";
 import { useBookLibrary } from "./useBookLibrary";
@@ -18,15 +21,26 @@ import type { Book } from "../types";
 WebBrowser.maybeCompleteAuthSession();
 
 export function useBookClubApp() {
-  const recommendationEngine = useMemo(() => new RecommendationEngine(MOCK_RECOMMENDATIONS), []);
+  const recommendationEngine = useMemo(() => new RecommendationEngine([]), []);
   const wheelEngine = useMemo(() => new WheelEngine(), []);
-  const guestLibraryBooks = useMemo<Book[]>(() => MOCK_BOOKS, []);
+  const fallbackGuestLibraryBooks = useMemo<Book[]>(() => MOCK_BOOKS, []);
 
   const auth = useAuthFlow();
   const navigation = useAppNavigation(auth.setEmailAuthMode);
   const clubs = useClubState(auth.authUser);
   const library = useBookLibrary(auth.authUser, clubs.selectedClub, clubs.setCurrentClubBook);
   const previousAuthUserId = useRef<string | null>(null);
+  const [aiPickerRecommendations, setAiPickerRecommendations] = useState<typeof MOCK_RECOMMENDATIONS>([]);
+  const [aiPickerExplanation, setAiPickerExplanation] = useState<string | null>(null);
+  const [aiPickerSource, setAiPickerSource] = useState<string | null>(null);
+  const [aiPickerLoading, setAiPickerLoading] = useState(false);
+  const [catalogBooks, setCatalogBooks] = useState<Book[]>([]);
+  const [discussionQuestions, setDiscussionQuestions] = useState<string[]>([]);
+  const [discussionQuestionsLoading, setDiscussionQuestionsLoading] = useState(false);
+  const [discussionQuestionsVisible, setDiscussionQuestionsVisible] = useState(false);
+  const [clubInsight, setClubInsight] = useState<ClubInsight | null>(null);
+  const [clubInsightLoading, setClubInsightLoading] = useState(false);
+  const personalizedRotationSeed = useRef<number>(Date.now()).current;
 
   useEffect(() => {
     const currentAuthUserId = auth.authUser?.id ?? null;
@@ -38,32 +52,131 @@ export function useBookClubApp() {
     previousAuthUserId.current = currentAuthUserId;
   }, [auth.authUser, navigation]);
 
+  useEffect(() => {
+    let ignore = false;
+
+    const loadCatalog = async () => {
+      try {
+        const books = await fetchBooks(undefined, 200);
+        if (!ignore) {
+          setCatalogBooks(books);
+        }
+      } catch {
+        if (!ignore) {
+          setCatalogBooks([]);
+        }
+      }
+    };
+
+    void loadCatalog();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const searchLibraryBooks = useMemo(() => {
+    return library.libraryEntries.map((entry) => entry.book);
+  }, [library.libraryEntries]);
+
+  const searchBooksFromApi = useMemo(() => {
+    return (query: string) => fetchBooks(query, 50);
+  }, []);
+
+  const guestLibraryBooks = useMemo<Book[]>(() => {
+    return catalogBooks.length > 0 ? catalogBooks : fallbackGuestLibraryBooks;
+  }, [catalogBooks, fallbackGuestLibraryBooks]);
+
+  const mergeBookIntoCatalog = (book: Book) => {
+    setCatalogBooks((current) => {
+      if (!current.some((entry) => entry.id === book.id)) {
+        return current;
+      }
+
+      return current.map((entry) => (entry.id === book.id ? mergeDetailedBook(entry, book) : entry));
+    });
+  };
+
+  const currentPickedBookKeys = useMemo(() => {
+    const currentEntry = library.libraryEntries.find((entry) => entry.isCurrentRead || entry.status === "current");
+    if (!currentEntry) {
+      return [];
+    }
+
+    return [`${currentEntry.book.title.trim().toLowerCase()}::${currentEntry.book.author.trim().toLowerCase()}`];
+  }, [library.libraryEntries]);
+
+  const currentClubBookDetails = library.currentClubBookDetails;
+
   const clubRecommendations = useMemo(() => {
-    return recommendationEngine.buildClubRecommendations(
-      clubs.selectedClub?.promptSeed || "cozy mystery for a rainy weekend",
-      clubs.selectedClub
-    );
-  }, [clubs.selectedClub, recommendationEngine]);
+    if (catalogBooks.length === 0) {
+      return [];
+    }
+
+    return recommendationEngine.buildPersonalizedRecommendations(catalogBooks, {
+      savedBooks: library.favoriteBooks,
+      finishedBooks: library.clubFinishedBooks,
+      currentBook: currentClubBookDetails,
+      club: clubs.selectedClub,
+      limit: 6,
+      rotationSeed: personalizedRotationSeed,
+    });
+  }, [
+    catalogBooks,
+    clubs.selectedClub,
+    currentClubBookDetails,
+    library.clubFinishedBooks,
+    library.favoriteBooks,
+    personalizedRotationSeed,
+    recommendationEngine,
+  ]);
 
   const search = useSearchCatalog(
     recommendationEngine,
     guestLibraryBooks,
-    library.favoriteBooks,
+    searchLibraryBooks,
     clubRecommendations,
-    library.setFavoriteBooks,
+    searchBooksFromApi,
+    mergeBookIntoCatalog,
     async (book) => {
-      if (!auth.authUser || !clubs.selectedClub) {
-        return;
-      }
-
       try {
-        await saveBookToClub(clubs.selectedClub.id, auth.authUser.id, book);
+        const savedBook = await library.persistBook(book);
         library.setBooksError(null);
+        return savedBook;
       } catch (error) {
         Alert.alert("Could not save book", error instanceof Error ? error.message : "Try again.");
+        throw error;
+      }
+    },
+    async (bookId) => {
+      try {
+        await library.removeBook(bookId);
+        library.setBooksError(null);
+      } catch (error) {
+        Alert.alert("Could not remove book", error instanceof Error ? error.message : "Try again.");
+        throw error;
       }
     }
   );
+
+  const personalizedRecommendations = useMemo(() => {
+    return recommendationEngine.buildPersonalizedRecommendations(catalogBooks, {
+      savedBooks: library.favoriteBooks,
+      finishedBooks: library.finishedBooks,
+      currentBook: currentClubBookDetails,
+      club: clubs.selectedClub,
+      limit: 3,
+      rotationSeed: personalizedRotationSeed,
+    });
+  }, [
+    catalogBooks,
+    clubs.selectedClub,
+    currentClubBookDetails,
+    library.favoriteBooks,
+    library.finishedBooks,
+    personalizedRotationSeed,
+    recommendationEngine,
+  ]);
 
   const pickNext = usePickNext(
     clubs.selectedClub,
@@ -71,14 +184,101 @@ export function useBookClubApp() {
     guestLibraryBooks,
     library.favoriteBooks,
     auth.authUser,
-    recommendationEngine.buildAiRecommendations(clubs.selectedClub?.promptSeed || "club taste", clubs.selectedClub),
-    wheelEngine
+    aiPickerRecommendations,
+    wheelEngine,
+    searchBooksFromApi
   );
 
-  const aiPickerRecommendations = useMemo(() => {
-    const query = pickNext.aiPickerPrompt.trim() || clubs.selectedClub?.promptSeed || "club taste";
-    return recommendationEngine.buildAiRecommendations(query, clubs.selectedClub);
-  }, [clubs.selectedClub, pickNext.aiPickerPrompt, recommendationEngine]);
+  useEffect(() => {
+    setAiPickerRecommendations([]);
+    setAiPickerExplanation(null);
+    setAiPickerSource(null);
+    setAiPickerLoading(false);
+  }, [clubs.selectedClub]);
+
+  useEffect(() => {
+    setDiscussionQuestions([]);
+    setDiscussionQuestionsLoading(false);
+    setDiscussionQuestionsVisible(false);
+  }, [clubs.selectedClub?.id, currentClubBookDetails?.id]);
+
+  useEffect(() => {
+    if (!clubs.selectedClub) {
+      setClubInsight(null);
+      setClubInsightLoading(false);
+      return;
+    }
+
+    let ignore = false;
+
+    const loadClubInsight = async () => {
+      setClubInsightLoading(true);
+
+      try {
+        const insight = await fetchClubInsight(clubs.selectedClub!.id);
+        if (!ignore) {
+          setClubInsight(insight);
+        }
+      } catch {
+        if (!ignore) {
+          setClubInsight(null);
+        }
+      } finally {
+        if (!ignore) {
+          setClubInsightLoading(false);
+        }
+      }
+    };
+
+    void loadClubInsight();
+
+    return () => {
+      ignore = true;
+    };
+  }, [
+    clubs.selectedClub,
+    library.favoriteBooks.length,
+    library.clubFinishedBooks.length,
+    currentClubBookDetails?.id,
+  ]);
+
+  useEffect(() => {
+    if (!clubs.selectedClub || !currentClubBookDetails) {
+      return;
+    }
+
+    let ignore = false;
+
+    const preloadDiscussionQuestions = async () => {
+      setDiscussionQuestionsLoading(true);
+
+      try {
+        const result = await fetchCurrentClubDiscussionQuestions(clubs.selectedClub!.id);
+
+        if (ignore) {
+          return;
+        }
+
+        if (!result.currentBookId || result.currentBookId === currentClubBookDetails.id) {
+          setDiscussionQuestions(result.questions);
+        }
+      } catch {
+        if (!ignore) {
+          setDiscussionQuestions([]);
+        }
+      } finally {
+        if (!ignore) {
+          setDiscussionQuestionsLoading(false);
+        }
+      }
+    };
+
+    void preloadDiscussionQuestions();
+
+    return () => {
+      ignore = true;
+    };
+  }, [clubs.selectedClub, currentClubBookDetails]);
 
   const header = useHeaderContent(navigation.screen, auth.authUser, clubs.selectedClub);
 
@@ -86,14 +286,67 @@ export function useBookClubApp() {
     await library.addSampleBook(() => navigation.setScreen("library"));
   };
 
-  const handleGenerateQuestions = () => {
-    Alert.alert("Discussion questions", "Question generation can be wired next.");
+  const handleGenerateQuestions = async () => {
+    if (!currentClubBookDetails) {
+      return;
+    }
+
+    setDiscussionQuestionsVisible(true);
+
+    if (discussionQuestions.length > 0 || discussionQuestionsLoading || !clubs.selectedClub) {
+      return;
+    }
+
+    try {
+      const result = await fetchCurrentClubDiscussionQuestions(clubs.selectedClub.id);
+      if (!result.currentBookId || result.currentBookId === currentClubBookDetails.id) {
+        setDiscussionQuestions(result.questions);
+      }
+    } catch (error) {
+      Alert.alert("Could not load questions", error instanceof Error ? error.message : "Try again in a moment.");
+    }
+  };
+
+  const handleGenerateAiPick = async () => {
+    const query = pickNext.aiPickerPrompt.trim() || clubs.selectedClub?.promptSeed || "book club taste";
+    setAiPickerLoading(true);
+
+    try {
+      const recommendationResult = await fetchRecommendedBooks(query, 6);
+      setAiPickerRecommendations(recommendationResult.recommendations);
+      setAiPickerExplanation(recommendationResult.explanation);
+      setAiPickerSource(recommendationResult.source);
+      pickNext.generateAiPick();
+
+      if (recommendationResult.recommendations.length === 0) {
+        Alert.alert("No recommendations found", "Try a broader prompt or add more books to the catalog.");
+      }
+    } catch (error) {
+      setAiPickerRecommendations([]);
+      setAiPickerExplanation(null);
+      setAiPickerSource(null);
+      pickNext.generateAiPick();
+      Alert.alert(
+        "Recommendation request failed",
+        error instanceof Error ? error.message : "The backend recommendation service is unavailable."
+      );
+    } finally {
+      setAiPickerLoading(false);
+    }
   };
 
   const handleSignOut = () => {
     auth.setAuthToken(null);
     auth.signOut();
     library.resetLibrary();
+  };
+
+  const handleScreenChange = (screen: "home" | "clubs" | "search" | "library" | "profile" | "pick-next") => {
+    if (screen === "clubs") {
+      clubs.setClubManagementMode("overview");
+    }
+
+    navigation.setScreen(screen);
   };
 
   const views: AppScreenViews = {
@@ -103,13 +356,31 @@ export function useBookClubApp() {
         selectedClub: clubs.selectedClub,
         selectedClubMembersCount: clubs.selectedClubMembers.length + (auth.authUser ? 1 : 0),
         favoriteBooksCount: library.favoriteBooks.length,
+        personalizedRecommendations,
+        currentClubBookDetails,
         aiPickerPrompt: pickNext.aiPickerPrompt,
         aiPickerGenerated: pickNext.aiPickerGenerated,
         aiPickerRecommendations,
+        aiPickerExplanation,
+        aiPickerSource,
+        aiPickerLoading,
       },
       actions: {
         onAiPromptChange: pickNext.updateAiPrompt,
-        onGenerateAiPick: pickNext.generateAiPick,
+        onGenerateAiPick: () => void handleGenerateAiPick(),
+        onAddHomeAiPickToWantToRead: (book) => {
+          return library.persistBook(book).then(() => undefined).catch((error) => {
+            Alert.alert("Could not add book", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onAddPersonalizedPickToWantToRead: (book) => {
+          return library.persistBook(book).then(() => undefined).catch((error) => {
+            Alert.alert("Could not add book", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onOpenClubs: () => navigation.setScreen("clubs"),
+        onOpenLibrary: () => navigation.setScreen("library"),
+        onOpenPickNext: () => navigation.setScreen("pick-next"),
         onSignIn: navigation.goToLogin,
         onSignUp: navigation.goToSignup,
       },
@@ -120,7 +391,8 @@ export function useBookClubApp() {
         clubs: clubs.clubs,
         selectedClub: clubs.selectedClub,
         selectedClubMembers: clubs.selectedClubMembers,
-        currentClubBook: clubs.currentClubBook,
+        currentClubBook: library.currentClubBookTitle,
+        currentClubBookDetails,
         clubManagementMode: clubs.clubManagementMode,
         clubSelectorOpen: clubs.clubSelectorOpen,
         clubSearchTerm: clubs.clubSearchTerm,
@@ -133,16 +405,33 @@ export function useBookClubApp() {
         clubActionLoading: clubs.clubActionLoading,
         clubActionError: clubs.clubActionError,
         favoriteBooksCount: library.favoriteBooks.length,
+        finishedBooksCount: library.clubFinishedBooks.length,
+        finishedBooks: library.clubFinishedBooks,
         booksLoading: library.booksLoading,
         booksError: library.booksError,
+        showSwitchClub: clubs.clubs.length > 1,
+        discussionQuestions: discussionQuestionsVisible ? discussionQuestions : [],
+        discussionQuestionsLoading,
+        clubInsight,
+        clubInsightLoading,
       },
       actions: {
         onOpenCreateClub: () => clubs.setClubManagementMode("create"),
         onOpenJoinClub: () => clubs.setClubManagementMode("join"),
+        onOpenSwitchClub: () => clubs.setClubSelectorOpen(true),
         onCloseClubManagement: () => clubs.setClubManagementMode("overview"),
         onToggleClubSelector: () => clubs.setClubSelectorOpen((open) => !open),
         onSelectClub: clubs.selectClub,
-        onGenerateQuestions: handleGenerateQuestions,
+        onMarkCurrentBookFinished: () => {
+          if (!currentClubBookDetails) {
+            return;
+          }
+
+          void library.markBookFinished(currentClubBookDetails.id).catch((error) => {
+            Alert.alert("Could not mark book as finished", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onGenerateQuestions: () => void handleGenerateQuestions(),
         onOpenPickNext: () => navigation.setScreen("pick-next"),
         onAddSampleBook: () => void handleAddSampleBook(),
         onClubSearchTermChange: clubs.setClubSearchTerm,
@@ -162,23 +451,50 @@ export function useBookClubApp() {
         filteredSearchBooks: search.filteredSearchBooks,
         selectedSearchBook: search.selectedSearchBook,
         savedSearchBookIds: search.savedSearchBookIds,
+        savedSearchBookKeys: search.savedSearchBookKeys,
+        currentPickedBookId: library.currentClubBookId,
+        currentPickedBookKeys,
       },
       actions: {
         onSearchTermChange: search.setSearchTerm,
         onSelectBook: search.setSelectedSearchBookId,
+        onCloseBookDetails: () => search.setSelectedSearchBookId(null),
         onToggleSaveBook: search.toggleSaveSearchBook,
+        onAddSearchBookToWantToRead: (book) => {
+          return library.persistBook(book).then(() => undefined).catch((error) => {
+            Alert.alert("Could not add book", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onMarkSearchBookFinished: (book) => {
+          return (async () => {
+            const savedBook = await library.persistBook(book);
+            await library.markBookFinished(savedBook.id);
+          })().catch((error) => {
+            Alert.alert("Could not mark book as finished", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onPickSearchBookForClub: (book) => {
+          return (async () => {
+            const savedBook = await library.persistBook(book);
+            await library.togglePickBookForClub(savedBook.id);
+          })().catch((error) => {
+            Alert.alert("Could not pick book for club", error instanceof Error ? error.message : "Try again.");
+          });
+        },
       },
     },
     pickNext: {
       model: {
         pickMode: pickNext.pickMode,
         selectedClub: clubs.selectedClub,
-        currentClubBook: clubs.currentClubBook,
+        currentClubBook: library.currentClubBookTitle,
         randomizerPool: pickNext.randomizerPool,
         randomizerResult: pickNext.randomizerResult,
         randomizerRunCount: pickNext.randomizerRunCount,
         wheelBooks: pickNext.wheelBooks,
         wheelBookInput: pickNext.wheelBookInput,
+        wheelSearchResults: pickNext.wheelSearchResults,
+        selectedWheelBookId: pickNext.selectedWheelBookId,
         wheelSpinning: pickNext.wheelSpinning,
         wheelResult: pickNext.wheelResult,
         wheelWinnerIndex: pickNext.wheelWinnerIndex,
@@ -189,17 +505,36 @@ export function useBookClubApp() {
         aiPickerPrompt: pickNext.aiPickerPrompt,
         aiPickerGenerated: pickNext.aiPickerGenerated,
         aiPickerRecommendations,
+        aiPickerExplanation,
+        aiPickerSource,
+        aiPickerLoading,
         wheelEngine,
+        currentPickedBookId: library.currentClubBookId,
+        currentPickedBookKeys,
       },
       actions: {
         onPickModeChange: pickNext.setPickMode,
         onRunRandomizer: pickNext.runRandomizer,
         onWheelBookInputChange: pickNext.setWheelBookInput,
+        onSelectWheelBook: pickNext.setSelectedWheelBookId,
         onAddWheelBook: pickNext.addWheelBook,
         onRemoveWheelBook: pickNext.removeWheelBook,
         onSpinWheel: pickNext.spinWheel,
         onAiPromptChange: pickNext.updateAiPrompt,
-        onGenerateAiPick: pickNext.generateAiPick,
+        onGenerateAiPick: () => void handleGenerateAiPick(),
+        onAddSuggestedBookToWantToRead: (book) => {
+          return library.persistBook(book).then(() => undefined).catch((error) => {
+            Alert.alert("Could not add book", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onPickSuggestedBookForClub: (book) => {
+          return (async () => {
+            const savedBook = await library.persistBook(book);
+            await library.togglePickBookForClub(savedBook.id);
+          })().catch((error) => {
+            Alert.alert("Could not pick book for club", error instanceof Error ? error.message : "Try again.");
+          });
+        },
       },
     },
     library: {
@@ -207,12 +542,44 @@ export function useBookClubApp() {
         authUser: auth.authUser,
         booksLoading: library.booksLoading,
         booksError: library.booksError,
+        currentReadingEntry: library.currentReadingEntry,
+        favoriteEntries: library.libraryEntries.filter(
+          (entry) =>
+            entry.status !== "finished" &&
+            entry.status !== "removed" &&
+            !(entry.isCurrentRead || entry.status === "current")
+        ),
+        finishedEntries: library.finishedEntries,
+        clubFinishedEntries: library.clubFinishedEntries,
         favoriteBooks: library.favoriteBooks,
+        finishedBooks: library.finishedBooks,
+        clubFinishedBooks: library.clubFinishedBooks,
         guestLibraryBooks,
+        currentPickedBookId: library.currentClubBookId,
       },
       actions: {
         onSignIn: navigation.goToLogin,
         onSignUp: navigation.goToSignup,
+        onRemoveBook: (bookId) => {
+          return library.removeBook(bookId).catch((error) => {
+            Alert.alert("Could not remove book", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onMarkAsRead: (bookId) => {
+          return library.markBookFinished(bookId).then(() => undefined).catch((error) => {
+            Alert.alert("Could not mark book as read", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onMarkAsSaved: (bookId) => {
+          return library.markBookSaved(bookId).then(() => undefined).catch((error) => {
+            Alert.alert("Could not move book to active shelf", error instanceof Error ? error.message : "Try again.");
+          });
+        },
+        onPickForClub: (bookId) => {
+          return library.togglePickBookForClub(bookId).then(() => undefined).catch((error) => {
+            Alert.alert("Could not set next read", error instanceof Error ? error.message : "Try again.");
+          });
+        },
       },
     },
     profile: {
@@ -242,7 +609,10 @@ export function useBookClubApp() {
 
   return {
     header,
-    navigation,
+    navigation: {
+      ...navigation,
+      setScreen: handleScreenChange,
+    },
     views,
   };
 }

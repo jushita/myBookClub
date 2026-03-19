@@ -57,9 +57,9 @@ async function seedBooksTable(): Promise<void> {
 
     await pool.query(
       `INSERT INTO books (
-         id, title, author, genre, description, synopsis, isbn_13, embedding, created_at
+         id, title, author, genre, description, synopsis, isbn_13, cover_image_url, embedding, created_at
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         row.id,
         row.title,
@@ -68,6 +68,7 @@ async function seedBooksTable(): Promise<void> {
         row.description,
         row.synopsis,
         row.isbn_13,
+        row.cover_image_url,
         row.embedding,
         row.created_at,
       ]

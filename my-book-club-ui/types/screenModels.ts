@@ -1,20 +1,31 @@
 import type { Animated } from "react-native";
 import type { DefaultWheelSlice, WheelSlice, WheelEngine } from "../domain/WheelEngine";
-import type { AuthUser, Book, Club, ClubMember, Recommendation } from "../types";
+import type { AuthUser, Book, Club, ClubLibraryEntry, ClubMember, Recommendation } from "../types";
+import type { ClubInsight } from "../services/clubs";
 
 export type HomeScreenModel = {
   authUser: AuthUser | null;
   selectedClub?: Club;
   selectedClubMembersCount: number;
   favoriteBooksCount: number;
+  personalizedRecommendations: Recommendation[];
+  currentClubBookDetails: Book | null;
   aiPickerPrompt: string;
   aiPickerGenerated: boolean;
   aiPickerRecommendations: Recommendation[];
+  aiPickerExplanation: string | null;
+  aiPickerSource: string | null;
+  aiPickerLoading: boolean;
 };
 
 export type HomeScreenActions = {
   onAiPromptChange: (value: string) => void;
   onGenerateAiPick: () => void;
+  onAddHomeAiPickToWantToRead: (book: Book) => Promise<void>;
+  onAddPersonalizedPickToWantToRead: (book: Book) => Promise<void>;
+  onOpenClubs: () => void;
+  onOpenLibrary: () => void;
+  onOpenPickNext: () => void;
   onSignIn: () => void;
   onSignUp: () => void;
 };
@@ -30,6 +41,7 @@ export type ClubsScreenModel = {
   selectedClub?: Club;
   selectedClubMembers: ClubMember[];
   currentClubBook: string;
+  currentClubBookDetails: Book | null;
   clubManagementMode: "overview" | "create" | "join";
   clubSelectorOpen: boolean;
   clubSearchTerm: string;
@@ -42,16 +54,25 @@ export type ClubsScreenModel = {
   clubActionLoading: boolean;
   clubActionError: string | null;
   favoriteBooksCount: number;
+  finishedBooksCount: number;
+  finishedBooks: Book[];
   booksLoading: boolean;
   booksError: string | null;
+  showSwitchClub: boolean;
+  discussionQuestions: string[];
+  discussionQuestionsLoading: boolean;
+  clubInsight: ClubInsight | null;
+  clubInsightLoading: boolean;
 };
 
 export type ClubsScreenActions = {
   onOpenCreateClub: () => void;
   onOpenJoinClub: () => void;
+  onOpenSwitchClub: () => void;
   onCloseClubManagement: () => void;
   onToggleClubSelector: () => void;
   onSelectClub: (clubId: string) => void;
+  onMarkCurrentBookFinished: () => void;
   onGenerateQuestions: () => void;
   onOpenPickNext: () => void;
   onAddSampleBook: () => void;
@@ -76,12 +97,19 @@ export type SearchScreenModel = {
   filteredSearchBooks: Book[];
   selectedSearchBook: Book | null;
   savedSearchBookIds: string[];
+  savedSearchBookKeys: string[];
+  currentPickedBookId: string | null;
+  currentPickedBookKeys: string[];
 };
 
 export type SearchScreenActions = {
   onSearchTermChange: (value: string) => void;
   onSelectBook: (bookId: string) => void;
+  onCloseBookDetails: () => void;
   onToggleSaveBook: (book: Book) => void;
+  onAddSearchBookToWantToRead: (book: Book) => Promise<void>;
+  onMarkSearchBookFinished: (book: Book) => Promise<void>;
+  onPickSearchBookForClub: (book: Book) => Promise<void>;
 };
 
 export type SearchScreenView = {
@@ -93,13 +121,24 @@ export type LibraryScreenModel = {
   authUser: AuthUser | null;
   booksLoading: boolean;
   booksError: string | null;
+  currentReadingEntry: ClubLibraryEntry | null;
+  favoriteEntries: ClubLibraryEntry[];
+  finishedEntries: ClubLibraryEntry[];
+  clubFinishedEntries: ClubLibraryEntry[];
   favoriteBooks: Book[];
+  finishedBooks: Book[];
+  clubFinishedBooks: Book[];
   guestLibraryBooks: Book[];
+  currentPickedBookId: string | null;
 };
 
 export type LibraryScreenActions = {
   onSignIn: () => void;
   onSignUp: () => void;
+  onRemoveBook: (bookId: string) => Promise<void>;
+  onMarkAsRead: (bookId: string) => Promise<void>;
+  onMarkAsSaved: (bookId: string) => Promise<void>;
+  onPickForClub: (bookId: string) => Promise<void>;
 };
 
 export type LibraryScreenView = {
@@ -142,10 +181,12 @@ export type PickNextScreenModel = {
   randomizerPool: Book[];
   randomizerResult: Book | null;
   randomizerRunCount: number;
-  wheelBooks: string[];
+  wheelBooks: Book[];
   wheelBookInput: string;
+  wheelSearchResults: Book[];
+  selectedWheelBookId: string | null;
   wheelSpinning: boolean;
-  wheelResult: string | null;
+  wheelResult: Book | null;
   wheelWinnerIndex: number | null;
   wheelRotation: Animated.AnimatedInterpolation<string>;
   wheelSlices: WheelSlice[];
@@ -154,18 +195,26 @@ export type PickNextScreenModel = {
   aiPickerPrompt: string;
   aiPickerGenerated: boolean;
   aiPickerRecommendations: Recommendation[];
+  aiPickerExplanation: string | null;
+  aiPickerSource: string | null;
+  aiPickerLoading: boolean;
   wheelEngine: WheelEngine;
+  currentPickedBookId: string | null;
+  currentPickedBookKeys: string[];
 };
 
 export type PickNextScreenActions = {
   onPickModeChange: (mode: "randomizer" | "wheel" | "ai") => void;
   onRunRandomizer: () => void;
   onWheelBookInputChange: (value: string) => void;
+  onSelectWheelBook: (bookId: string) => void;
   onAddWheelBook: () => void;
-  onRemoveWheelBook: (book: string) => void;
+  onRemoveWheelBook: (bookId: string) => void;
   onSpinWheel: () => void;
   onAiPromptChange: (value: string) => void;
   onGenerateAiPick: () => void;
+  onAddSuggestedBookToWantToRead: (book: Book) => Promise<void>;
+  onPickSuggestedBookForClub: (book: Book) => Promise<void>;
 };
 
 export type PickNextScreenView = {

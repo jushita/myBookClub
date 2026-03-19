@@ -1,9 +1,15 @@
-import React from "react";
-import { Animated, Pressable, Text, TextInput, View } from "react-native";
+import React, { useState } from "react";
+import { Animated, Image, Pressable, Text, TextInput, View } from "react-native";
 import Svg, { Circle, G, Line, Path, Text as SvgText } from "react-native-svg";
+import { getBookCoverUrl } from "../../data/bookCoverFallbacks";
 import { WheelEngine } from "../../domain/WheelEngine";
+import { useActionFeedback } from "../../hooks/useActionFeedback";
+import { fetchBookDetails, mergeDetailedBook } from "../../services/api";
 import { appStyles } from "../../styles/appStyles";
 import type { PickNextScreenActions, PickNextScreenModel } from "../../types/screenModels";
+import type { Book } from "../../types";
+import { BookCard } from "../BookCard";
+import { BookDetailsModal } from "../BookDetailsModal";
 import { Card } from "../common/Card";
 
 type PickNextScreenProps = {
@@ -12,6 +18,84 @@ type PickNextScreenProps = {
 };
 
 export function PickNextScreen({ model, actions }: PickNextScreenProps) {
+  const { labels, runWithFeedback } = useActionFeedback();
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [bookDetailsLoading, setBookDetailsLoading] = useState(false);
+  const getBookLookupKey = (book: Pick<Book, "title" | "author">) =>
+    `${book.title.trim().toLowerCase()}::${book.author.trim().toLowerCase()}`;
+  const wheelWinnerIsPicked = model.wheelResult
+    ? model.currentPickedBookId === model.wheelResult.id ||
+      model.currentPickedBookKeys.includes(getBookLookupKey(model.wheelResult))
+    : false;
+  const renderSuggestedBookCard = (book: Book & { matchReason?: string }) => (
+    <View key={book.id} style={appStyles.candidateRow}>
+      <View style={appStyles.aiSuggestionCardTop}>
+        {getBookCoverUrl(book) ? (
+          <Image source={{ uri: getBookCoverUrl(book)! }} style={appStyles.aiSuggestionCover} />
+        ) : (
+          <View style={appStyles.aiSuggestionCoverPlaceholder}>
+            <Text style={appStyles.aiSuggestionCoverPlaceholderText}>Cover</Text>
+          </View>
+        )}
+        <View style={appStyles.aiSuggestionCopy}>
+          <Text style={appStyles.candidateTitle}>{book.title}</Text>
+          <Text style={appStyles.candidateMeta}>{book.author}</Text>
+          <Text style={appStyles.aiSuggestionDescription} numberOfLines={4}>
+            {book.description || book.note}
+          </Text>
+        </View>
+      </View>
+      <View style={appStyles.candidateActionStack}>
+        <Pressable
+          style={({ pressed }) => [
+            appStyles.neuButton,
+            appStyles.primaryButton,
+            appStyles.candidatePrimaryAction,
+            pressed ? appStyles.primaryButtonPressed : null,
+          ]}
+          onPress={() => void runWithFeedback(`picknext-want-${book.id}`, "Added", () => actions.onAddSuggestedBookToWantToRead(book))}
+        >
+          <Text style={appStyles.primaryButtonText}>{labels[`picknext-want-${book.id}`] || "Want to Read"}</Text>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [
+            appStyles.secondaryButton,
+            appStyles.candidateSecondaryAction,
+            pressed ? appStyles.secondaryButtonPressed : null,
+          ]}
+          onPress={() =>
+            void runWithFeedback(
+              `picknext-club-${book.id}`,
+              model.currentPickedBookId === book.id || model.currentPickedBookKeys.includes(getBookLookupKey(book))
+                ? "Cleared"
+                : "Picked",
+              () => actions.onPickSuggestedBookForClub(book)
+            )
+          }
+        >
+          <Text style={appStyles.secondaryButtonText}>
+            {labels[`picknext-club-${book.id}`] ||
+              (model.currentPickedBookId === book.id || model.currentPickedBookKeys.includes(getBookLookupKey(book))
+                ? "Picked"
+                : "Pick For Club")}
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  const openBookDetails = (book: Book) => {
+    setSelectedBook(book);
+    setBookDetailsLoading(true);
+    void fetchBookDetails(book.id)
+      .then((details) => {
+        setSelectedBook(mergeDetailedBook(book, details));
+      })
+      .finally(() => {
+        setBookDetailsLoading(false);
+      });
+  };
+
   return (
     <View style={appStyles.stack}>
       <Card>
@@ -24,7 +108,11 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
           ].map((option) => (
             <Pressable
               key={option.mode}
-              style={[appStyles.pickModeButton, model.pickMode === option.mode ? appStyles.pickModeButtonActive : null]}
+              style={({ pressed }) => [
+                appStyles.pickModeButton,
+                model.pickMode === option.mode ? appStyles.pickModeButtonActive : null,
+                pressed ? appStyles.chipPressed : null,
+              ]}
               onPress={() => actions.onPickModeChange(option.mode)}
             >
               <Text style={[appStyles.pickModeTitle, model.pickMode === option.mode ? appStyles.pickModeTitleActive : null]}>
@@ -52,7 +140,14 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
               </View>
             ))}
           </View>
-          <Pressable style={[appStyles.neuButton, appStyles.primaryButton]} onPress={actions.onRunRandomizer}>
+          <Pressable
+            style={({ pressed }) => [
+              appStyles.neuButton,
+              appStyles.primaryButton,
+              pressed ? appStyles.primaryButtonPressed : null,
+            ]}
+            onPress={actions.onRunRandomizer}
+          >
             <Text style={appStyles.primaryButtonText}>Run randomizer</Text>
           </Pressable>
           {model.randomizerResult ? (
@@ -78,19 +173,50 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
             <TextInput
               value={model.wheelBookInput}
               onChangeText={actions.onWheelBookInputChange}
-              placeholder="Add a book to the wheel"
+              placeholder="Search by title, author, or genre"
               placeholderTextColor="rgba(255, 232, 244, 0.52)"
               style={[appStyles.field, appStyles.wheelField]}
               editable={!model.wheelSpinning}
             />
             <Pressable
-              style={[appStyles.neuButton, appStyles.wheelAddButton, model.wheelSpinning ? appStyles.buttonDisabled : null]}
+              style={({ pressed }) => [
+                appStyles.neuButton,
+                appStyles.wheelAddButton,
+                model.wheelSpinning ? appStyles.buttonDisabled : null,
+                pressed ? appStyles.primaryButtonPressed : null,
+              ]}
               onPress={actions.onAddWheelBook}
               disabled={model.wheelSpinning}
             >
               <Text style={appStyles.primaryButtonText}>Add</Text>
             </Pressable>
           </View>
+          {model.wheelBookInput.trim() ? (
+            <View style={appStyles.candidateStack}>
+              {model.wheelSearchResults.slice(0, 6).map((book) => (
+                <Pressable
+                  key={book.id}
+                  style={({ pressed }) => [
+                    appStyles.searchResultRow,
+                    model.selectedWheelBookId === book.id ? appStyles.searchResultRowActive : null,
+                    pressed ? appStyles.chipPressed : null,
+                  ]}
+                  onPress={() => actions.onSelectWheelBook(book.id)}
+                >
+                  <View style={appStyles.searchResultCopy}>
+                    <Text style={appStyles.candidateTitle}>{book.title}</Text>
+                    <Text style={appStyles.candidateMeta}>{book.author}</Text>
+                  </View>
+                  <Text style={appStyles.searchResultChevron}>›</Text>
+                </Pressable>
+              ))}
+              {model.wheelSearchResults.length === 0 ? (
+                <Text style={appStyles.bodyText}>No books matched that search.</Text>
+              ) : (
+                <Text style={appStyles.helperText}>Tap a result, then add it to the wheel.</Text>
+              )}
+            </View>
+          ) : null}
           <Text style={appStyles.helperText}>{model.wheelBooks.length} of {model.maxWheelBooks} books added</Text>
           <View style={appStyles.wheelShell}>
             <View style={appStyles.wheelPointer} />
@@ -191,14 +317,24 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
           </View>
           <View style={appStyles.memberRow}>
             {model.wheelBooks.map((book) => (
-              <Pressable key={book} style={appStyles.memberChip} onPress={() => actions.onRemoveWheelBook(book)} disabled={model.wheelSpinning}>
-                <Text style={appStyles.memberName}>{book} ×</Text>
+              <Pressable
+                key={book.id}
+                style={({ pressed }) => [appStyles.memberChip, pressed ? appStyles.chipPressed : null]}
+                onPress={() => actions.onRemoveWheelBook(book.id)}
+                disabled={model.wheelSpinning}
+              >
+                <Text style={appStyles.memberName}>{book.title} ×</Text>
               </Pressable>
             ))}
           </View>
           {model.wheelBooks.length >= 2 ? (
             <Pressable
-              style={[appStyles.neuButton, appStyles.primaryButton, model.wheelSpinning ? appStyles.buttonDisabled : null]}
+              style={({ pressed }) => [
+                appStyles.neuButton,
+                appStyles.primaryButton,
+                model.wheelSpinning ? appStyles.buttonDisabled : null,
+                pressed ? appStyles.primaryButtonPressed : null,
+              ]}
               onPress={actions.onSpinWheel}
               disabled={model.wheelSpinning}
             >
@@ -206,9 +342,24 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
             </Pressable>
           ) : null}
           {model.wheelResult ? (
-            <View style={appStyles.candidateRow}>
-              <Text style={appStyles.candidateTitle}>{model.wheelResult}</Text>
-              <Text style={appStyles.candidateMeta}>The wheel picked this as the next club read.</Text>
+            <View style={appStyles.candidateStack}>
+              <Text style={appStyles.sectionTitle}>Picked for your club</Text>
+              <BookCard
+                book={model.wheelResult}
+                onPress={() => openBookDetails(model.wheelResult!)}
+                actionLabel={labels["picknext-wheel-pick"] || (wheelWinnerIsPicked ? "Picked" : "Pick For Club")}
+                onActionPress={() =>
+                  void runWithFeedback("picknext-wheel-pick", wheelWinnerIsPicked ? "Cleared" : "Picked", () =>
+                    actions.onPickSuggestedBookForClub(model.wheelResult!)
+                  )
+                }
+                secondaryActionLabel={labels["picknext-wheel-save"] || "Want to Read"}
+                onSecondaryActionPress={() =>
+                  void runWithFeedback("picknext-wheel-save", "Added", () =>
+                    actions.onAddSuggestedBookToWantToRead(model.wheelResult!)
+                  )
+                }
+              />
             </View>
           ) : null}
         </Card>
@@ -228,29 +379,42 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
             placeholderTextColor="rgba(255, 232, 244, 0.52)"
             style={appStyles.input}
           />
-          <Pressable style={[appStyles.neuButton, appStyles.primaryButton]} onPress={actions.onGenerateAiPick}>
+          <Pressable
+            style={({ pressed }) => [
+              appStyles.neuButton,
+              appStyles.primaryButton,
+              pressed ? appStyles.primaryButtonPressed : null,
+            ]}
+            onPress={actions.onGenerateAiPick}
+          >
             <Text style={appStyles.primaryButtonText}>Generate AI pick</Text>
           </Pressable>
-          {model.aiPickerGenerated ? (
-            <View style={appStyles.candidateStack}>
-              <View style={appStyles.candidateRow}>
-                <Text style={appStyles.candidateTitle}>{model.aiPickerRecommendations[0]?.title || model.currentClubBook}</Text>
-                <Text style={appStyles.candidateMeta}>
-                  {model.aiPickerPrompt.trim()
-                    ? `Picked for: ${model.aiPickerPrompt.trim()}`
-                    : `Picked from ${model.selectedClub?.name || "your club"} preferences.`}
-                </Text>
-              </View>
-              {model.aiPickerRecommendations.slice(0, 2).map((book) => (
-                <View key={book.id} style={appStyles.candidateRow}>
-                  <Text style={appStyles.candidateTitle}>{book.title}</Text>
-                  <Text style={appStyles.candidateMeta}>{book.matchReason}</Text>
-                </View>
-              ))}
+          {model.aiPickerLoading ? (
+            <View style={appStyles.aiStatusCard}>
+              <Text style={appStyles.aiStatusEyebrow}>AI scouting in progress</Text>
+              <Text style={appStyles.aiStatusTitle}>Scanning shelves, moods, and chart energy...</Text>
+              <Text style={appStyles.aiStatusBody}>
+                Pulling together picks that feel right for the club instead of just matching a keyword.
+              </Text>
             </View>
+          ) : null}
+          {model.aiPickerGenerated ? (
+            model.aiPickerRecommendations.length > 0 ? (
+              <View style={appStyles.candidateStack}>
+                {model.aiPickerRecommendations.slice(0, 3).map((book, index) =>
+                  renderSuggestedBookCard({
+                    ...book,
+                    matchReason: index === 0 ? undefined : book.matchReason,
+                  })
+                )}
+              </View>
+            ) : (
+              <Text style={appStyles.bodyText}>No recommendations found. Try a broader prompt.</Text>
+            )
           ) : null}
         </Card>
       ) : null}
+      <BookDetailsModal visible={Boolean(selectedBook)} book={selectedBook} loading={bookDetailsLoading} onClose={() => setSelectedBook(null)} />
     </View>
   );
 }

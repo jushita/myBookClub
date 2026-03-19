@@ -9,7 +9,7 @@ export function useClubState(authUser: AuthUser | null) {
   const [clubManagementMode, setClubManagementMode] = useState<"overview" | "create" | "join">("overview");
   const [clubSelectorOpen, setClubSelectorOpen] = useState(false);
   const [selectedClubMembers, setSelectedClubMembers] = useState<ClubMember[]>([]);
-  const [currentClubBook, setCurrentClubBook] = useState("The Maid");
+  const [currentClubBook, setCurrentClubBook] = useState("");
   const [clubSearchTerm, setClubSearchTerm] = useState("");
   const [selectedJoinClubId, setSelectedJoinClubId] = useState("");
   const [selectedJoinClubMembers, setSelectedJoinClubMembers] = useState<ClubMember[]>([]);
@@ -60,7 +60,7 @@ export function useClubState(authUser: AuthUser | null) {
       setAllClubs([]);
       setSelectedClubId("");
       setSelectedClubMembers([]);
-      setCurrentClubBook("The Maid");
+      setCurrentClubBook("");
       setClubManagementMode("overview");
       setClubSearchTerm("");
       setSelectedJoinClubId("");

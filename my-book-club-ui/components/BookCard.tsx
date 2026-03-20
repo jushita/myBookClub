@@ -29,7 +29,10 @@ export function BookCard({
   onPress,
 }: Props) {
   const coverImageUrl = getBookCoverUrl(book);
-  const description = book.description || (recommendation && "matchReason" in book ? book.matchReason : book.note);
+  const description =
+    book.synopsis ||
+    book.description ||
+    (recommendation && "matchReason" in book ? book.matchReason : book.note);
   const genreLabel = book.genre?.trim() || "";
   const coverMonogram = book.title
     .split(/\s+/)

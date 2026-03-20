@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Animated, Image, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, Image, Pressable, Text, TextInput, View } from "react-native";
 import Svg, { Circle, G, Line, Path, Text as SvgText } from "react-native-svg";
 import { getBookCoverUrl } from "../../data/bookCoverFallbacks";
 import { WheelEngine } from "../../domain/WheelEngine";
@@ -182,17 +182,28 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
               style={({ pressed }) => [
                 appStyles.neuButton,
                 appStyles.wheelAddButton,
-                model.wheelSpinning ? appStyles.buttonDisabled : null,
+                model.wheelSpinning || model.wheelSearchLoading || !model.selectedWheelBookId ? appStyles.buttonDisabled : null,
                 pressed ? appStyles.primaryButtonPressed : null,
               ]}
               onPress={actions.onAddWheelBook}
-              disabled={model.wheelSpinning}
+              disabled={model.wheelSpinning || model.wheelSearchLoading || !model.selectedWheelBookId}
             >
-              <Text style={appStyles.primaryButtonText}>Add</Text>
+              <Text style={appStyles.primaryButtonText}>{model.wheelSearchLoading ? "..." : "Add"}</Text>
             </Pressable>
           </View>
           {model.wheelBookInput.trim() ? (
             <View style={appStyles.candidateStack}>
+              {model.wheelSearchLoading ? (
+                <View style={appStyles.discussionLoadingCard}>
+                  <View style={appStyles.discussionLoadingHeader}>
+                    <ActivityIndicator size="small" color="#FFD7AE" />
+                    <Text style={appStyles.discussionLoadingTitle}>Searching books</Text>
+                  </View>
+                  <Text style={appStyles.discussionLoadingBody}>
+                    Looking through your catalog first, then widening the search if needed.
+                  </Text>
+                </View>
+              ) : null}
               {model.wheelSearchResults.slice(0, 6).map((book) => (
                 <Pressable
                   key={book.id}
@@ -202,6 +213,7 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
                     pressed ? appStyles.chipPressed : null,
                   ]}
                   onPress={() => actions.onSelectWheelBook(book.id)}
+                  disabled={model.wheelSearchLoading}
                 >
                   <View style={appStyles.searchResultCopy}>
                     <Text style={appStyles.candidateTitle}>{book.title}</Text>
@@ -210,11 +222,11 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
                   <Text style={appStyles.searchResultChevron}>›</Text>
                 </Pressable>
               ))}
-              {model.wheelSearchResults.length === 0 ? (
+              {!model.wheelSearchLoading && model.wheelSearchResults.length === 0 ? (
                 <Text style={appStyles.bodyText}>No books matched that search.</Text>
-              ) : (
+              ) : !model.wheelSearchLoading ? (
                 <Text style={appStyles.helperText}>Tap a result, then add it to the wheel.</Text>
-              )}
+              ) : null}
             </View>
           ) : null}
           <Text style={appStyles.helperText}>{model.wheelBooks.length} of {model.maxWheelBooks} books added</Text>

@@ -22,6 +22,7 @@ export function usePickNext(
   const [wheelBooks, setWheelBooks] = useState<Book[]>([]);
   const [wheelSearchResults, setWheelSearchResults] = useState<Book[]>([]);
   const [selectedWheelBookId, setSelectedWheelBookId] = useState<string | null>(null);
+  const [wheelSearchLoading, setWheelSearchLoading] = useState(false);
   const [wheelResult, setWheelResult] = useState<Book | null>(null);
   const [wheelWinnerIndex, setWheelWinnerIndex] = useState<number | null>(null);
   const [wheelSpinTarget, setWheelSpinTarget] = useState(360 * 5);
@@ -29,6 +30,7 @@ export function usePickNext(
   const [randomizerResult, setRandomizerResult] = useState<Book | null>(null);
   const [randomizerRunCount, setRandomizerRunCount] = useState(0);
   const wheelSpin = useRef(new Animated.Value(0)).current;
+  const wheelSearchSequence = useRef(0);
 
   const randomizerPool = useMemo(() => {
     if (authUser && favoriteBooks.length > 0) {
@@ -63,6 +65,7 @@ export function usePickNext(
     setWheelBooks([]);
     setWheelSearchResults([]);
     setSelectedWheelBookId(null);
+    setWheelSearchLoading(false);
     setWheelResult(null);
     setWheelWinnerIndex(null);
     setWheelSpinTarget(360 * 5);
@@ -75,19 +78,24 @@ export function usePickNext(
     if (!trimmed) {
       setWheelSearchResults([]);
       setSelectedWheelBookId(null);
+      setWheelSearchLoading(false);
       return;
     }
 
-    let ignore = false;
+    const sequence = ++wheelSearchSequence.current;
+    setWheelSearchLoading(true);
+    setWheelSearchResults([]);
+    setSelectedWheelBookId(null);
 
-    const runSearch = async () => {
+    const timer = setTimeout(async () => {
       try {
         const books = await onSearchBooks?.(trimmed);
-        if (ignore) {
+        if (wheelSearchSequence.current !== sequence) {
           return;
         }
 
         setWheelSearchResults(books ?? []);
+        setWheelSearchLoading(false);
         setSelectedWheelBookId((current) => {
           if (!current) {
             return null;
@@ -96,17 +104,16 @@ export function usePickNext(
           return (books ?? []).some((book) => book.id === current) ? current : null;
         });
       } catch {
-        if (!ignore) {
+        if (wheelSearchSequence.current === sequence) {
           setWheelSearchResults([]);
           setSelectedWheelBookId(null);
+          setWheelSearchLoading(false);
         }
       }
-    };
-
-    void runSearch();
+    }, 250);
 
     return () => {
-      ignore = true;
+      clearTimeout(timer);
     };
   }, [onSearchBooks, wheelBookInput]);
 
@@ -206,6 +213,7 @@ export function usePickNext(
     wheelBookInput,
     wheelBooks,
     wheelSearchResults,
+    wheelSearchLoading,
     selectedWheelBookId,
     wheelResult,
     wheelWinnerIndex,

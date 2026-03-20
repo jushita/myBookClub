@@ -63,6 +63,57 @@ function normalize(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function tokenizeQuery(query: string): string[] {
+  return normalize(query)
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function buildSearchText(book: Book): string {
+  return normalize(
+    [
+      book.title,
+      book.author,
+      book.genre,
+      book.description,
+      book.synopsis,
+      ...(book.subjects ?? []),
+      book.isbn10 ?? "",
+      book.isbn13 ?? "",
+    ].join(" ")
+  );
+}
+
+function hasStrongLocalMatch(params: SearchFallbackParams, localBooks: Book[]): boolean {
+  const rawQuery = normalize(params.query || "");
+  const rawGenre = normalize(params.genre || "");
+
+  if (!rawQuery && !rawGenre) {
+    return localBooks.length > 0;
+  }
+
+  const queryTokens = tokenizeQuery(params.query || "");
+  const requiredTokens = queryTokens.length > 0 ? queryTokens : rawGenre ? tokenizeQuery(rawGenre) : [];
+
+  return localBooks.some((book) => {
+    const title = normalize(book.title);
+    const author = normalize(book.author);
+    const genre = normalize(book.genre);
+    const searchable = buildSearchText(book);
+    const exactTitleAuthor = rawQuery
+      ? title.includes(rawQuery) || author.includes(rawQuery) || `${title} ${author}`.includes(rawQuery)
+      : false;
+    const genreMatch = rawGenre ? genre.includes(rawGenre) : false;
+    const tokenCoverage =
+      requiredTokens.length > 0
+        ? requiredTokens.every((token) => searchable.includes(token))
+        : false;
+
+    return exactTitleAuthor || genreMatch || tokenCoverage;
+  });
+}
+
 function getMetadataCacheKey(book: Pick<Book, "title" | "author" | "isbn13" | "isbn10">): string {
   return [
     normalize(book.title),
@@ -267,7 +318,7 @@ export async function searchBooksWithFallback(params: SearchFallbackParams, loca
     return cached;
   }
 
-  if (localBooks.length > 0) {
+  if (localBooks.length > 0 && hasStrongLocalMatch(params, localBooks)) {
     const enriched = await Promise.all(localBooks.map((book) => enrichBookFromExternalSources(book)));
     cacheSet(queryCache, cacheKey, "books", enriched);
     return enriched;
@@ -291,10 +342,20 @@ export async function searchBooksWithFallback(params: SearchFallbackParams, loca
 
   try {
     const googleBooks = await searchGoogleBooks(fallbackQuery, params.limit);
-    cacheSet(queryCache, cacheKey, "books", googleBooks);
-    return googleBooks;
+    if (googleBooks.length > 0) {
+      cacheSet(queryCache, cacheKey, "books", googleBooks);
+      return googleBooks;
+    }
   } catch {
-    cacheSet(queryCache, cacheKey, "books", []);
-    return [];
+    // ignore and fall back to local results if they exist
   }
+
+  if (localBooks.length > 0) {
+    const enriched = await Promise.all(localBooks.map((book) => enrichBookFromExternalSources(book)));
+    cacheSet(queryCache, cacheKey, "books", enriched);
+    return enriched;
+  }
+
+  cacheSet(queryCache, cacheKey, "books", []);
+  return [];
 }

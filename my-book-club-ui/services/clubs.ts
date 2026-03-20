@@ -1,8 +1,9 @@
 import type { Book, Club, ClubBookStatus, ClubLibraryEntry, ClubMember } from "../types";
 import { getBookCoverUrl } from "../data/bookCoverFallbacks";
+import { normalizeGenreLabel, pickDisplaySummary } from "./bookPresentation";
 import { apiBaseUrl, requestJson } from "./http";
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE_TTL_MS = 30_000;
 const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
 
@@ -56,7 +57,6 @@ type ClubInsightResponse = {
   insight: {
     headline: string;
     summary: string;
-    signals: string[];
     source: "ollama" | "fallback";
   };
 };
@@ -64,7 +64,6 @@ type ClubInsightResponse = {
 export type ClubInsight = {
   headline: string;
   summary: string;
-  signals: string[];
   source: "ollama" | "fallback";
 };
 
@@ -131,6 +130,18 @@ async function readThroughCache<T>(key: string, loader: () => Promise<T>): Promi
   return value;
 }
 
+function peekCacheValue<T>(key: string): T | null {
+  const cached = responseCache.get(key);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    if (cached) {
+      responseCache.delete(key);
+    }
+    return null;
+  }
+
+  return cached.value as T;
+}
+
 function invalidateCache(prefixes: string[]) {
   for (const key of responseCache.keys()) {
     if (prefixes.some((prefix) => key.startsWith(prefix))) {
@@ -145,14 +156,16 @@ function toBook(apiBook: ApiBook): Book {
     author: apiBook.author,
     coverImageUrl: apiBook.coverImageUrl ?? null,
   });
+  const summary = pickDisplaySummary(apiBook);
 
   return {
     id: apiBook.id,
     title: apiBook.title,
     author: apiBook.author,
-    genre: apiBook.genre,
-    note: apiBook.synopsis || apiBook.description || "",
-    description: apiBook.description || apiBook.synopsis || "",
+    genre: normalizeGenreLabel(apiBook.genre),
+    note: summary.note,
+    description: summary.description,
+    synopsis: summary.synopsis,
     coverImageUrl,
   };
 }
@@ -290,6 +303,14 @@ export async function fetchCurrentClubDiscussionQuestions(
   });
 }
 
+export function getCachedCurrentClubDiscussionQuestions(
+  clubId: string
+): { currentBookId: string | null; questions: string[] } | null {
+  return peekCacheValue<{ currentBookId: string | null; questions: string[] }>(
+    `${CACHE_VERSION}:clubs:${clubId}:discussion:current`
+  );
+}
+
 export async function fetchClubInsight(clubId: string): Promise<ClubInsight> {
   const cacheKey = `${CACHE_VERSION}:clubs:${clubId}:insights`;
   return readThroughCache(cacheKey, async () => {
@@ -300,15 +321,13 @@ export async function fetchClubInsight(clubId: string): Promise<ClubInsight> {
     return {
       headline: normalizeInsightText(data.insight?.headline, "Club taste snapshot"),
       summary: normalizeInsightText(data.insight?.summary, "The club insight is still warming up."),
-      signals: Array.isArray(data.insight?.signals)
-        ? data.insight.signals
-            .map((signal) => normalizeInsightText(signal, ""))
-            .filter((signal) => Boolean(signal) && !signal.includes("[object Object]"))
-            .slice(0, 3)
-        : [],
       source: data.insight?.source === "ollama" ? "ollama" : "fallback",
     };
   });
+}
+
+export function getCachedClubInsight(clubId: string): ClubInsight | null {
+  return peekCacheValue<ClubInsight>(`${CACHE_VERSION}:clubs:${clubId}:insights`);
 }
 
 export async function saveBookToClub(

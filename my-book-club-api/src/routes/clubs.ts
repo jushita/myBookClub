@@ -36,6 +36,7 @@ import { findUserById, listUsersByIds } from "../repositories/users.js";
 import { generateClubTasteInsight, generateDiscussionQuestions } from "../services/bookAssistant.js";
 
 const CLUB_INSIGHT_REFRESH_MS = 1000 * 60 * 60 * 24;
+const CLUB_INSIGHT_FORMAT_VERSION = "v5";
 
 type CreateClubBody = {
   name?: string;
@@ -102,7 +103,7 @@ function normalizeTopTerms(values: string[]): string[] {
 }
 
 function buildShelfFingerprint(clubBooks: ClubBook[], booksById: Map<string, Book>): string {
-  return [...clubBooks]
+  return [CLUB_INSIGHT_FORMAT_VERSION, ...[...clubBooks]
     .sort((left, right) => left.bookId.localeCompare(right.bookId) || left.userId.localeCompare(right.userId))
     .map((entry) => {
       const book = booksById.get(entry.bookId);
@@ -113,7 +114,7 @@ function buildShelfFingerprint(clubBooks: ClubBook[], booksById: Map<string, Boo
         book?.genre || "",
         book?.author || "",
       ].join(":");
-    })
+    })]
     .join("|");
 }
 
@@ -143,7 +144,7 @@ async function getOrCreateCurrentDiscussionQuestions(clubId: string) {
 
   const existingRecord = await findDiscussionQuestionsForClubBook(club.id, book.id);
 
-  if (existingRecord) {
+  if (existingRecord && existingRecord.questions.length === 5) {
     return {
       club,
       currentClubBook,
@@ -156,6 +157,10 @@ async function getOrCreateCurrentDiscussionQuestions(clubId: string) {
     title: book.title,
     author: book.author,
     description: book.description || book.synopsis,
+    genres: book.genre
+      .split(/[,&/]/)
+      .map((value) => value.trim())
+      .filter(Boolean),
     clubName: club.name,
     clubVibe: club.vibe,
   });
@@ -497,7 +502,6 @@ clubsRouter.get("/:clubId/insights", async (req: Request, res: Response) => {
         insight: {
           headline: cachedInsight.headline,
           summary: cachedInsight.summary,
-          signals: cachedInsight.signals,
           source: cachedInsight.source,
         },
       });
@@ -529,10 +533,18 @@ clubsRouter.get("/:clubId/insights", async (req: Request, res: Response) => {
       clubName: club.name,
       clubVibe: club.vibe,
       memberCount: members.length,
+      memberNames: members.map((member) => member.userId || member.role).filter(Boolean).slice(0, 6),
       currentReadTitle: currentBook?.title,
       currentReadAuthor: currentBook?.author,
+      currentReadDescription: currentBook?.synopsis || currentBook?.description || "",
       savedTitles: savedBooks.slice(0, 8).map((book) => book.title),
       finishedTitles: finishedBooks.slice(0, 8).map((book) => book.title),
+      savedBookDetails: savedBooks
+        .slice(0, 8)
+        .map((book) => `${book.title} by ${book.author}${book.genre ? ` [${book.genre}]` : ""}`),
+      finishedBookDetails: finishedBooks
+        .slice(0, 8)
+        .map((book) => `${book.title} by ${book.author}${book.genre ? ` [${book.genre}]` : ""}`),
       topGenres,
       topAuthors,
     });
@@ -543,7 +555,7 @@ clubsRouter.get("/:clubId/insights", async (req: Request, res: Response) => {
       shelfFingerprint,
       headline: insight.headline,
       summary: insight.summary,
-      signals: insight.signals,
+      signals: [],
       source: insight.source,
     });
 

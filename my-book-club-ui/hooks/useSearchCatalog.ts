@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RecommendationEngine } from "../domain/RecommendationEngine";
 import { prewarmBookDetails } from "../services/api";
 import type { Book, Recommendation } from "../types";
@@ -22,10 +22,12 @@ export function useSearchCatalog(
   const [savedSearchBookIds, setSavedSearchBookIds] = useState<string[]>([]);
   const [savedSearchBookKeys, setSavedSearchBookKeys] = useState<string[]>([]);
   const [remoteSearchBooks, setRemoteSearchBooks] = useState<Book[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const requestSequence = useRef(0);
 
   const searchBooks = useMemo(() => {
     if (searchTerm.trim()) {
-      return recommendationEngine.mergeCatalog(remoteSearchBooks, libraryBooks, recommendations);
+      return remoteSearchBooks;
     }
 
     return recommendationEngine.mergeCatalog(defaultCatalogBooks, libraryBooks, recommendations);
@@ -55,28 +57,32 @@ export function useSearchCatalog(
   useEffect(() => {
     if (!searchTerm.trim()) {
       setRemoteSearchBooks([]);
+      setIsSearching(false);
       return;
     }
 
-    let ignore = false;
+    const sequence = ++requestSequence.current;
+    setIsSearching(true);
+    setRemoteSearchBooks([]);
+    setSelectedSearchBookId(null);
 
-    const runSearch = async () => {
+    const timer = setTimeout(async () => {
       try {
         const books = await onSearchBooks?.(searchTerm);
-        if (!ignore) {
+        if (requestSequence.current === sequence) {
           setRemoteSearchBooks(books ?? []);
+          setIsSearching(false);
         }
       } catch {
-        if (!ignore) {
+        if (requestSequence.current === sequence) {
           setRemoteSearchBooks([]);
+          setIsSearching(false);
         }
       }
-    };
-
-    void runSearch();
+    }, 250);
 
     return () => {
-      ignore = true;
+      clearTimeout(timer);
     };
   }, [onSearchBooks, searchTerm]);
 
@@ -115,6 +121,7 @@ export function useSearchCatalog(
     savedSearchBookIds,
     savedSearchBookKeys,
     filteredSearchBooks,
+    isSearching,
     selectedSearchBook,
     setSearchTerm,
     setSelectedSearchBookId,

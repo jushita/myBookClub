@@ -11,6 +11,10 @@
     "build:android": "expo run:android",
     "ios": "expo run:ios",
     "android": "expo run:android",
+    "test": "npm run test:unit && npm run test:ui",
+    "test:unit": "node --import ../my-book-club-api/node_modules/tsx/dist/loader.mjs --test ./**/*.test.ts",
+    "test:ui": "jest --config ./jest.config.js --runInBand",
+    "test:ui:coverage": "jest --config ./jest.config.js --runInBand --coverage",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit"
   },
@@ -30,8 +34,13 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "^30.0.0",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.6",
+    "jest": "^30.3.0",
+    "jest-expo": "^55.0.11",
+    "react-test-renderer": "^19.1.0",
     "typescript": "~5.9.2"
   }
 }

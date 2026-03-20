@@ -6,7 +6,12 @@ import { RecommendationEngine } from "../domain/RecommendationEngine";
 import { WheelEngine } from "../domain/WheelEngine";
 import { fetchBooks, mergeDetailedBook } from "../services/api";
 import { fetchRecommendedBooks } from "../services/recommendations";
-import { fetchClubInsight, fetchCurrentClubDiscussionQuestions } from "../services/clubs";
+import {
+  fetchClubInsight,
+  fetchCurrentClubDiscussionQuestions,
+  getCachedClubInsight,
+  getCachedCurrentClubDiscussionQuestions,
+} from "../services/clubs";
 import type { ClubInsight } from "../services/clubs";
 import { useAppNavigation } from "./useAppNavigation";
 import { useAuthFlow } from "./useAuthFlow";
@@ -41,6 +46,7 @@ export function useBookClubApp() {
   const [clubInsight, setClubInsight] = useState<ClubInsight | null>(null);
   const [clubInsightLoading, setClubInsightLoading] = useState(false);
   const personalizedRotationSeed = useRef<number>(Date.now()).current;
+  const discussionRequestRef = useRef<Promise<{ currentBookId: string | null; questions: string[] }> | null>(null);
 
   useEffect(() => {
     const currentAuthUserId = auth.authUser?.id ?? null;
@@ -210,22 +216,22 @@ export function useBookClubApp() {
     }
 
     let ignore = false;
+    const cachedInsight = getCachedClubInsight(clubs.selectedClub.id);
+
+    if (cachedInsight) {
+      setClubInsight(cachedInsight);
+      setClubInsightLoading(false);
+    }
 
     const loadClubInsight = async () => {
-      setClubInsightLoading(true);
-
       try {
         const insight = await fetchClubInsight(clubs.selectedClub!.id);
         if (!ignore) {
           setClubInsight(insight);
         }
       } catch {
-        if (!ignore) {
+        if (!ignore && !cachedInsight) {
           setClubInsight(null);
-        }
-      } finally {
-        if (!ignore) {
-          setClubInsightLoading(false);
         }
       }
     };
@@ -244,16 +250,42 @@ export function useBookClubApp() {
 
   useEffect(() => {
     if (!clubs.selectedClub || !currentClubBookDetails) {
+      discussionRequestRef.current = null;
       return;
     }
 
     let ignore = false;
+    const cachedDiscussion = getCachedCurrentClubDiscussionQuestions(clubs.selectedClub.id);
+
+    if (
+      cachedDiscussion &&
+      (!cachedDiscussion.currentBookId || cachedDiscussion.currentBookId === currentClubBookDetails.id)
+    ) {
+      setDiscussionQuestions(cachedDiscussion.questions);
+    }
+
+    const startDiscussionRequest = () => {
+      if (!clubs.selectedClub) {
+        return null;
+      }
+
+      if (!discussionRequestRef.current) {
+        discussionRequestRef.current = fetchCurrentClubDiscussionQuestions(clubs.selectedClub.id).finally(() => {
+          discussionRequestRef.current = null;
+        });
+      }
+
+      return discussionRequestRef.current;
+    };
 
     const preloadDiscussionQuestions = async () => {
-      setDiscussionQuestionsLoading(true);
-
       try {
-        const result = await fetchCurrentClubDiscussionQuestions(clubs.selectedClub!.id);
+        const request = startDiscussionRequest();
+        if (!request) {
+          return;
+        }
+
+        const result = await request;
 
         if (ignore) {
           return;
@@ -263,12 +295,8 @@ export function useBookClubApp() {
           setDiscussionQuestions(result.questions);
         }
       } catch {
-        if (!ignore) {
+        if (!ignore && !cachedDiscussion) {
           setDiscussionQuestions([]);
-        }
-      } finally {
-        if (!ignore) {
-          setDiscussionQuestionsLoading(false);
         }
       }
     };
@@ -293,17 +321,39 @@ export function useBookClubApp() {
 
     setDiscussionQuestionsVisible(true);
 
-    if (discussionQuestions.length > 0 || discussionQuestionsLoading || !clubs.selectedClub) {
+    if (discussionQuestions.length > 0 || !clubs.selectedClub) {
       return;
     }
 
+    const startDiscussionRequest = () => {
+      if (!clubs.selectedClub) {
+        return null;
+      }
+
+      if (!discussionRequestRef.current) {
+        discussionRequestRef.current = fetchCurrentClubDiscussionQuestions(clubs.selectedClub.id).finally(() => {
+          discussionRequestRef.current = null;
+        });
+      }
+
+      return discussionRequestRef.current;
+    };
+
     try {
-      const result = await fetchCurrentClubDiscussionQuestions(clubs.selectedClub.id);
+      setDiscussionQuestionsLoading(true);
+      const request = startDiscussionRequest();
+      if (!request) {
+        return;
+      }
+
+      const result = await request;
       if (!result.currentBookId || result.currentBookId === currentClubBookDetails.id) {
         setDiscussionQuestions(result.questions);
       }
     } catch (error) {
       Alert.alert("Could not load questions", error instanceof Error ? error.message : "Try again in a moment.");
+    } finally {
+      setDiscussionQuestionsLoading(false);
     }
   };
 
@@ -448,6 +498,7 @@ export function useBookClubApp() {
     search: {
       model: {
         searchTerm: search.searchTerm,
+        searchLoading: search.isSearching,
         filteredSearchBooks: search.filteredSearchBooks,
         selectedSearchBook: search.selectedSearchBook,
         savedSearchBookIds: search.savedSearchBookIds,
@@ -494,6 +545,7 @@ export function useBookClubApp() {
         wheelBooks: pickNext.wheelBooks,
         wheelBookInput: pickNext.wheelBookInput,
         wheelSearchResults: pickNext.wheelSearchResults,
+        wheelSearchLoading: pickNext.wheelSearchLoading,
         selectedWheelBookId: pickNext.selectedWheelBookId,
         wheelSpinning: pickNext.wheelSpinning,
         wheelResult: pickNext.wheelResult,

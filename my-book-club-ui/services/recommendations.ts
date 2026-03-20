@@ -1,5 +1,6 @@
 import type { Recommendation, RecommendationResult } from "../types";
 import { getBookCoverUrl } from "../data/bookCoverFallbacks";
+import { normalizeGenreLabel, pickDisplaySummary } from "./bookPresentation";
 import { apiBaseUrl, requestJson } from "./http";
 
 type ApiBook = {
@@ -38,22 +39,31 @@ export async function fetchRecommendedBooks(prompt: string, limit = 6): Promise<
   });
 
   return {
-    recommendations: data.books.map((book) => ({
-      id: book.id,
-      title: book.title,
-      author: book.author,
-      genre: book.genre,
-      note: book.synopsis || book.description || "Recommended from the book catalog.",
-      description: book.description || book.synopsis || "Recommended from the book catalog.",
-      coverImageUrl: getBookCoverUrl({
+    recommendations: data.books.map((book) => {
+      const summary = pickDisplaySummary({
+        synopsis: book.synopsis,
+        description: book.description,
+        fallback: "Recommended from the book catalog.",
+      });
+
+      return {
+        id: book.id,
         title: book.title,
         author: book.author,
-        coverImageUrl: book.coverImageUrl ?? null,
-      }),
-      matchReason:
-        data.searchPlan.explanation ||
-        `Matched from ${data.searchPlan.source || "assistant"} recommendation search.`,
-    })),
+        genre: normalizeGenreLabel(book.genre),
+        note: summary.note,
+        description: summary.description,
+        synopsis: summary.synopsis,
+        coverImageUrl: getBookCoverUrl({
+          title: book.title,
+          author: book.author,
+          coverImageUrl: book.coverImageUrl ?? null,
+        }),
+        matchReason:
+          data.searchPlan.explanation ||
+          `Matched from ${data.searchPlan.source || "assistant"} recommendation search.`,
+      };
+    }),
     explanation:
       data.searchPlan.explanation ||
       `Matched from ${data.searchPlan.source || "assistant"} recommendation search.`,

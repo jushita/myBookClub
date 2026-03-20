@@ -94,6 +94,7 @@ export type ClubsScreenView = {
 
 export type SearchScreenModel = {
   searchTerm: string;
+  searchLoading: boolean;
   filteredSearchBooks: Book[];
   selectedSearchBook: Book | null;
   savedSearchBookIds: string[];
@@ -184,6 +185,7 @@ export type PickNextScreenModel = {
   wheelBooks: Book[];
   wheelBookInput: string;
   wheelSearchResults: Book[];
+  wheelSearchLoading: boolean;
   selectedWheelBookId: string | null;
   wheelSpinning: boolean;
   wheelResult: Book | null;

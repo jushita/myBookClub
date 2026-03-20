@@ -1,5 +1,6 @@
 import type { Book } from "../types";
 import { getBookCoverUrl } from "../data/bookCoverFallbacks";
+import { normalizeGenreLabel, pickDisplaySummary } from "./bookPresentation";
 import { apiBaseUrl, requestJson } from "./http";
 
 type ApiBook = {
@@ -38,15 +39,16 @@ function toBook(apiBook: ApiBook): Book {
     author: apiBook.author,
     coverImageUrl: apiBook.coverImageUrl ?? null,
   });
+  const summary = pickDisplaySummary(apiBook);
 
   return {
     id: apiBook.id,
     title: apiBook.title,
     author: apiBook.author,
-    genre: apiBook.genre?.trim() || "",
-    note: apiBook.description || apiBook.synopsis || "",
-    description: apiBook.description || apiBook.synopsis || "",
-    synopsis: apiBook.synopsis || apiBook.description || "",
+    genre: normalizeGenreLabel(apiBook.genre),
+    note: summary.note,
+    description: summary.description,
+    synopsis: summary.synopsis,
     coverImageUrl,
     averageRating: typeof apiBook.averageRating === "number" ? apiBook.averageRating : null,
     ratingsCount: typeof apiBook.ratingsCount === "number" ? apiBook.ratingsCount : null,

@@ -13,6 +13,22 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
   const [booksLoading, setBooksLoading] = useState(false);
   const [booksError, setBooksError] = useState<string | null>(null);
 
+  const applyLibrarySnapshot = (
+    nextLibraryEntries: ClubLibraryEntry[],
+    nextClubFinishedEntries: ClubLibraryEntry[] = clubFinishedEntries
+  ) => {
+    setLibraryEntries(nextLibraryEntries);
+    syncShelfState(nextLibraryEntries);
+    setClubFinishedEntries(nextClubFinishedEntries);
+    setClubFinishedBooks(nextClubFinishedEntries.map((entry) => entry.book));
+  };
+
+  const reconcileLibraryInBackground = (nextAuthUser = authUser, nextSelectedClub = selectedClub) => {
+    void reloadLibrary(nextAuthUser, nextSelectedClub).catch((error) => {
+      setBooksError(error instanceof Error ? error.message : "Failed to sync the club library.");
+    });
+  };
+
   const getCurrentClubBookTitle = (entries: ClubLibraryEntry[]) => {
     const activeEntries = entries.filter((entry) => entry.status !== "finished" && entry.status !== "removed");
     return (
@@ -114,9 +130,26 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
     }
 
     try {
-      await saveSampleBookToClub(selectedClub.id, authUser.id);
-      await reloadLibrary();
+      const savedBook = await saveSampleBookToClub(selectedClub.id, authUser.id);
+      const optimisticEntry: ClubLibraryEntry = {
+        id: `optimistic-sample-${savedBook.id}`,
+        clubId: selectedClub.id,
+        userId: authUser.id,
+        bookId: savedBook.id,
+        status: "saved",
+        isCurrentRead: false,
+        addedAt: undefined,
+        book: savedBook,
+      };
+      applyLibrarySnapshot(
+        [
+          optimisticEntry,
+          ...libraryEntries.filter((entry) => entry.bookId !== savedBook.id),
+        ],
+        clubFinishedEntries
+      );
       setBooksError(null);
+      reconcileLibraryInBackground();
       onSaved?.();
     } catch (error) {
       Alert.alert(
@@ -131,11 +164,44 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
       return book;
     }
 
-    const savedBook = await saveBookToClub(selectedClub.id, authUser.id, book);
-    await reloadLibrary();
-    setBooksError(null);
+    const previousLibraryEntries = libraryEntries;
+    const previousClubFinishedEntries = clubFinishedEntries;
+    const optimisticEntry: ClubLibraryEntry = {
+      id: `optimistic-save-${book.id}`,
+      clubId: selectedClub.id,
+      userId: authUser.id,
+      bookId: book.id,
+      status: "saved",
+      isCurrentRead: false,
+      addedAt: undefined,
+      book,
+    };
 
-    return savedBook;
+    applyLibrarySnapshot(
+      [optimisticEntry, ...libraryEntries.filter((entry) => entry.bookId !== book.id)],
+      clubFinishedEntries
+    );
+
+    try {
+      const savedBook = await saveBookToClub(selectedClub.id, authUser.id, book);
+      applyLibrarySnapshot(
+        [
+          {
+            ...optimisticEntry,
+            id: optimisticEntry.id.replace("optimistic-save", "saved"),
+            book: savedBook,
+          },
+          ...previousLibraryEntries.filter((entry) => entry.bookId !== savedBook.id),
+        ],
+        previousClubFinishedEntries
+      );
+      setBooksError(null);
+      reconcileLibraryInBackground();
+      return savedBook;
+    } catch (error) {
+      applyLibrarySnapshot(previousLibraryEntries, previousClubFinishedEntries);
+      throw error;
+    }
   };
 
   const removeBook = async (bookId: string) => {
@@ -143,9 +209,21 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
       return;
     }
 
-    await removeBookFromClub(selectedClub.id, authUser.id, bookId);
-    await reloadLibrary();
-    setBooksError(null);
+    const previousLibraryEntries = libraryEntries;
+    const previousClubFinishedEntries = clubFinishedEntries;
+    applyLibrarySnapshot(
+      libraryEntries.filter((entry) => entry.bookId !== bookId),
+      clubFinishedEntries.filter((entry) => entry.bookId !== bookId)
+    );
+
+    try {
+      await removeBookFromClub(selectedClub.id, authUser.id, bookId);
+      setBooksError(null);
+      reconcileLibraryInBackground();
+    } catch (error) {
+      applyLibrarySnapshot(previousLibraryEntries, previousClubFinishedEntries);
+      throw error;
+    }
   };
 
   const updateBookStatus = async (bookId: string, status: "saved" | "finished") => {
@@ -153,16 +231,45 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
       return;
     }
 
-    const entry =
+    const previousLibraryEntries = libraryEntries;
+    const previousClubFinishedEntries = clubFinishedEntries;
+    const targetEntry = previousLibraryEntries.find((entry) => entry.bookId === bookId);
+
+    if (!targetEntry) {
+      return;
+    }
+
+    const nextEntry: ClubLibraryEntry = {
+      ...targetEntry,
+      status,
+      isCurrentRead: status === "finished" ? false : targetEntry.isCurrentRead,
+    };
+    const nextLibraryEntries =
       status === "finished"
-        ? await updateClubBookEntry(selectedClub.id, authUser.id, bookId, {
-            status: "finished",
-            isCurrentRead: false,
-          })
-        : await updateClubBookStatus(selectedClub.id, authUser.id, bookId, status);
-    await reloadLibrary();
-    setBooksError(null);
-    return entry;
+        ? previousLibraryEntries.filter((entry) => entry.bookId !== bookId)
+        : previousLibraryEntries.map((entry) => (entry.bookId === bookId ? nextEntry : entry));
+    const nextClubFinishedEntries =
+      status === "finished"
+        ? [nextEntry, ...previousClubFinishedEntries.filter((entry) => entry.bookId !== bookId)]
+        : previousClubFinishedEntries.filter((entry) => entry.bookId !== bookId);
+
+    applyLibrarySnapshot(nextLibraryEntries, nextClubFinishedEntries);
+
+    try {
+      const entry =
+        status === "finished"
+          ? await updateClubBookEntry(selectedClub.id, authUser.id, bookId, {
+              status: "finished",
+              isCurrentRead: false,
+            })
+          : await updateClubBookStatus(selectedClub.id, authUser.id, bookId, status);
+      setBooksError(null);
+      reconcileLibraryInBackground();
+      return entry;
+    } catch (error) {
+      applyLibrarySnapshot(previousLibraryEntries, previousClubFinishedEntries);
+      throw error;
+    }
   };
 
   const pickBookForClub = async (bookId: string) => {
@@ -170,33 +277,59 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
       return;
     }
 
+    const previousLibraryEntries = libraryEntries;
     const currentEntry = libraryEntries.find(
       (entry) => entry.book.id !== bookId && (entry.isCurrentRead || entry.status === "current")
     );
 
-    const updates = [];
+    const optimisticEntries: ClubLibraryEntry[] = libraryEntries.map((entry) => {
+      if (entry.bookId === bookId) {
+        return {
+          ...entry,
+          status: "current" as const,
+          isCurrentRead: true,
+        };
+      }
 
-    if (currentEntry) {
-      updates.push(
-        updateClubBookEntry(selectedClub.id, authUser.id, currentEntry.book.id, {
-          status: "saved",
+      if (entry.bookId === currentEntry?.book.id) {
+        return {
+          ...entry,
+          status: "saved" as const,
           isCurrentRead: false,
+        };
+      }
+
+      return entry;
+    });
+
+    applyLibrarySnapshot(optimisticEntries, clubFinishedEntries);
+
+    try {
+      const updates = [];
+
+      if (currentEntry) {
+        updates.push(
+          updateClubBookEntry(selectedClub.id, authUser.id, currentEntry.book.id, {
+            status: "saved",
+            isCurrentRead: false,
+          })
+        );
+      }
+
+      updates.push(
+        updateClubBookEntry(selectedClub.id, authUser.id, bookId, {
+          status: "current",
+          isCurrentRead: true,
         })
       );
-    }
 
-    updates.push(
-      updateClubBookEntry(selectedClub.id, authUser.id, bookId, {
-        status: "current",
-        isCurrentRead: true,
-      })
-    );
-
-    const updatedEntries = await Promise.all(updates);
-    if (updatedEntries.length > 0) {
-      await reloadLibrary();
+      await Promise.all(updates);
+      setBooksError(null);
+      reconcileLibraryInBackground();
+    } catch (error) {
+      applyLibrarySnapshot(previousLibraryEntries, clubFinishedEntries);
+      throw error;
     }
-    setBooksError(null);
   };
 
   const clearPickedBookForClub = async (bookId: string) => {
@@ -204,12 +337,31 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
       return;
     }
 
-    await updateClubBookEntry(selectedClub.id, authUser.id, bookId, {
-      status: "saved",
-      isCurrentRead: false,
-    });
-    await reloadLibrary();
-    setBooksError(null);
+    const previousLibraryEntries = libraryEntries;
+    applyLibrarySnapshot(
+      libraryEntries.map((entry) =>
+        entry.bookId === bookId
+          ? {
+              ...entry,
+              status: "saved",
+              isCurrentRead: false,
+            }
+          : entry
+      ),
+      clubFinishedEntries
+    );
+
+    try {
+      await updateClubBookEntry(selectedClub.id, authUser.id, bookId, {
+        status: "saved",
+        isCurrentRead: false,
+      });
+      setBooksError(null);
+      reconcileLibraryInBackground();
+    } catch (error) {
+      applyLibrarySnapshot(previousLibraryEntries, clubFinishedEntries);
+      throw error;
+    }
   };
 
   const togglePickBookForClub = async (bookId: string) => {

@@ -13,17 +13,64 @@ type ClubDiscussionQuestionsRow = {
   id: string;
   club_id: string;
   book_id: string;
-  questions: string[];
+  questions: unknown[];
   created_at: Date | string;
   updated_at: Date | string;
 };
+
+function normalizeStoredQuestionText(value: unknown): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === "[object Object]") {
+      return "";
+    }
+
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return normalizeStoredQuestionText(JSON.parse(trimmed));
+      } catch {
+        return trimmed;
+      }
+    }
+
+    return trimmed;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeStoredQuestionText(item))
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  }
+
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>)
+      .map((item) => normalizeStoredQuestionText(item))
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  }
+
+  if (value == null) {
+    return "";
+  }
+
+  const text = String(value).trim();
+  return text && text !== "[object Object]" ? text : "";
+}
 
 function fromRow(row: ClubDiscussionQuestionsRow): ClubDiscussionQuestionsRecord {
   return {
     id: row.id,
     clubId: row.club_id,
     bookId: row.book_id,
-    questions: Array.isArray(row.questions) ? row.questions.map((question) => String(question).trim()).filter(Boolean) : [],
+    questions: Array.isArray(row.questions)
+      ? row.questions.map((question) => normalizeStoredQuestionText(question)).filter(Boolean)
+      : [],
     createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
     updatedAt: row.updated_at instanceof Date ? row.updated_at : new Date(row.updated_at),
   };

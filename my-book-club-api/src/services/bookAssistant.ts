@@ -29,6 +29,7 @@ type DiscussionQuestionRequest = {
   title: string;
   author?: string;
   description?: string;
+  genres?: string[];
   clubName?: string;
   clubVibe?: string;
 };
@@ -37,10 +38,14 @@ type ClubTasteInsightRequest = {
   clubName: string;
   clubVibe?: string;
   memberCount: number;
+  memberNames: string[];
   currentReadTitle?: string;
   currentReadAuthor?: string;
+  currentReadDescription?: string;
   savedTitles: string[];
   finishedTitles: string[];
+  savedBookDetails: string[];
+  finishedBookDetails: string[];
   topGenres: string[];
   topAuthors: string[];
 };
@@ -48,9 +53,74 @@ type ClubTasteInsightRequest = {
 type ClubTasteInsight = {
   headline: string;
   summary: string;
-  signals: string[];
   source: "ollama" | "fallback";
 };
+
+function withPeriod(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function buildDirectClubSummary(input: ClubTasteInsightRequest): string {
+  const currentRead = input.currentReadTitle
+    ? `Right now you're clustering around ${input.currentReadTitle}`
+    : "Your shelf is still choosing its next obsession";
+  const vibe = input.clubVibe?.trim().toLowerCase() || "a distinct reading mood";
+
+  return withPeriod(
+    `${currentRead}, and with ${input.memberCount} readers in the mix, your club is giving off ${vibe} energy in a very convincing way`
+  );
+}
+
+function formatList(values: string[], limit = 5): string {
+  return values.slice(0, limit).join(", ") || "None";
+}
+
+function buildClubTasteContext(input: ClubTasteInsightRequest): string {
+  const savedCount = input.savedTitles.length;
+  const finishedCount = input.finishedTitles.length;
+  const primaryGenre = input.topGenres[0] || "mixed taste";
+  const secondaryGenre = input.topGenres[1] || "";
+  const anchorAuthor = input.topAuthors[0] || "";
+
+  return [
+    `Club: ${input.clubName}`,
+    `Club vibe: ${input.clubVibe || "No explicit vibe provided"}`,
+    `Member count: ${input.memberCount}`,
+    `Member names sample: ${formatList(input.memberNames, 6)}`,
+    `Current read: ${input.currentReadTitle ? `${input.currentReadTitle} by ${input.currentReadAuthor || "Unknown author"}` : "None"}`,
+    `Current read description: ${input.currentReadDescription || "None"}`,
+    `Saved shelf count: ${savedCount}`,
+    `Finished shelf count: ${finishedCount}`,
+    `Saved titles sample: ${formatList(input.savedTitles, 8)}`,
+    `Finished titles sample: ${formatList(input.finishedTitles, 8)}`,
+    `Saved shelf detail sample: ${formatList(input.savedBookDetails, 8)}`,
+    `Finished shelf detail sample: ${formatList(input.finishedBookDetails, 8)}`,
+    `Top genres: ${formatList(input.topGenres, 6)}`,
+    `Top authors: ${formatList(input.topAuthors, 6)}`,
+    `Pattern hints: primary genre is ${primaryGenre}${secondaryGenre ? ` with ${secondaryGenre} also recurring` : ""}${anchorAuthor ? `; ${anchorAuthor} is a recurring author signal` : ""}.`,
+  ].join("\n");
+}
+
+function buildClubInsightHeadline(input: ClubTasteInsightRequest): string {
+  if (input.topGenres[0] && input.topAuthors[0]) {
+    return `${input.topGenres[0]} instincts`;
+  }
+
+  if (input.topGenres[0]) {
+    return `${input.topGenres[0]} shelf`;
+  }
+
+  if (input.currentReadTitle) {
+    return "Current taste";
+  }
+
+  return "Taste snapshot";
+}
 
 type OllamaParseResult = {
   query?: string;
@@ -131,6 +201,38 @@ function normalizeInsightText(value: unknown, fallback = ""): string {
   if (value && typeof value === "object") {
     const text = Object.values(value as Record<string, unknown>)
       .map((item) => normalizeInsightText(item, ""))
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return text || fallback;
+  }
+
+  if (value == null) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+function normalizeDiscussionQuestionText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+
+  if (Array.isArray(value)) {
+    const joined = value
+      .map((item) => normalizeDiscussionQuestionText(item, ""))
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return joined || fallback;
+  }
+
+  if (value && typeof value === "object") {
+    const text = Object.values(value as Record<string, unknown>)
+      .map((item) => normalizeDiscussionQuestionText(item, ""))
       .filter(Boolean)
       .join(" ")
       .trim();
@@ -247,6 +349,8 @@ async function parsePromptWithOllama(prompt: string): Promise<OllamaParseResult 
 async function generateDiscussionQuestionsWithOllama(input: DiscussionQuestionRequest): Promise<string[] | null> {
   const baseUrl = process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434";
   const model = process.env.OLLAMA_MODEL?.trim() || "llama3.1:8b";
+  const tone = inferDiscussionTone(input.clubVibe);
+  const genres = normalizeList(input.genres);
 
   const response = await fetch(`${baseUrl}/api/generate`, {
     method: "POST",
@@ -258,15 +362,25 @@ async function generateDiscussionQuestionsWithOllama(input: DiscussionQuestionRe
       stream: false,
       format: "json",
       prompt: [
-        "You write book-club discussion questions.",
+        "You are a skilled book club moderator who creates engaging, thought-provoking discussions.",
         "Return only JSON with a single key named questions.",
         "questions must be an array of exactly 5 distinct questions.",
-        "Write questions that are specific, conversational, and good for a live club discussion.",
-        "Do not number the questions.",
-        `Book title: ${input.title}`,
-        `Author: ${input.author || "Unknown author"}`,
+        "Generate 5 discussion questions for the following book.",
+        "Questions should spark conversation and debate.",
+        "Include a mix of character analysis, themes, emotional reactions, plot interpretation, and moral dilemmas when relevant.",
+        "Encourage opinions, not factual recall.",
+        "Avoid generic or obvious questions.",
+        "Avoid yes/no questions.",
+        "Keep each question under 2 lines.",
+        "Make them feel natural and discussion-friendly.",
+        "Do NOT summarize the book.",
+        "Do NOT include answers.",
+        `Adjust the tone of the questions to be ${tone}.`,
+        `Title: ${input.title}`,
         `Description: ${input.description || "No description provided."}`,
-        `Club name: ${input.clubName || "Book club"}`,
+        `Genres: ${genres.join(", ") || "unknown"}`,
+        `Author: ${input.author || "Unknown author"}`,
+        `Club: ${input.clubName || "Book club"}`,
         `Club vibe: ${input.clubVibe || "thoughtful"}`,
       ].join("\n"),
     }),
@@ -289,11 +403,33 @@ async function generateDiscussionQuestionsWithOllama(input: DiscussionQuestionRe
   }
 
   const questions = parsed.questions
-    .map((value) => String(value).trim())
+    .map((value) => normalizeDiscussionQuestionText(value, ""))
     .filter(Boolean)
     .slice(0, 5);
 
   return questions.length === 5 ? questions : null;
+}
+
+function inferDiscussionTone(clubVibe?: string): "casual" | "deep" | "spicy" | "fun" {
+  const vibe = clubVibe?.trim().toLowerCase() || "";
+
+  if (!vibe) {
+    return "deep";
+  }
+
+  if (/(chaotic|spicy|messy|dramatic|bold)/.test(vibe)) {
+    return "spicy";
+  }
+
+  if (/(fun|playful|light|cozy|warm)/.test(vibe)) {
+    return "fun";
+  }
+
+  if (/(casual|easygoing|relaxed|breezy)/.test(vibe)) {
+    return "casual";
+  }
+
+  return "deep";
 }
 
 function buildFallbackDiscussionQuestions(input: DiscussionQuestionRequest): string[] {
@@ -338,19 +474,27 @@ async function generateClubTasteInsightWithOllama(input: ClubTasteInsightRequest
       stream: false,
       format: "json",
       prompt: [
-        "You summarize a book club's taste using real reading data.",
-        "Return only JSON with keys: headline, summary, signals.",
-        "headline should be 2 to 5 words and feel like a club taste label.",
-        "summary should be one sentence, concrete and readable.",
-        "signals must be an array of exactly 3 short observations grounded in the data.",
-        `Club name: ${input.clubName}`,
-        `Club vibe: ${input.clubVibe || "No explicit vibe provided"}`,
-        `Member count: ${input.memberCount}`,
-        `Current read: ${input.currentReadTitle ? `${input.currentReadTitle} by ${input.currentReadAuthor || "Unknown author"}` : "None"}`,
-        `Saved titles: ${input.savedTitles.join(", ") || "None"}`,
-        `Finished titles: ${input.finishedTitles.join(", ") || "None"}`,
-        `Top genres: ${input.topGenres.join(", ") || "None"}`,
-        `Top authors: ${input.topAuthors.join(", ") || "None"}`,
+        "You are a witty literary critic.",
+        "Given a reader's taste, write a short 1-3 line taste snapshot.",
+        "Make it:",
+        "- clever",
+        "- slightly playful or insightful",
+        "- not generic",
+        "- not overly long",
+        "- no emojis",
+        "- vivid rather than vague",
+        "Add constraints:",
+        "- Avoid cliches like 'loves stories' or 'enjoys reading'",
+        "- Keep under 40 words",
+        "- Use at least one concrete signal from the provided taste data",
+        "Return only JSON with keys: headline and summary.",
+        "headline should be 2 to 4 words max.",
+        "summary should be the snapshot only.",
+        "Example:",
+        "Reader taste: fantasy + political intrigue",
+        "Output: Prefers kingdoms where power whispers louder than swords, and loyalty is always negotiable.",
+        "Reader taste:",
+        buildClubTasteContext(input),
       ].join("\n"),
     }),
   });
@@ -365,48 +509,29 @@ async function generateClubTasteInsightWithOllama(input: ClubTasteInsightRequest
     return null;
   }
 
-  const parsed = JSON.parse(data.response) as { headline?: unknown; summary?: unknown; signals?: unknown };
+  const parsed = JSON.parse(data.response) as { headline?: unknown; summary?: unknown };
 
-  if (!Array.isArray(parsed.signals)) {
-    return null;
-  }
-
-  const signals = parsed.signals.map((value) => normalizeInsightText(value, "")).filter(Boolean).slice(0, 3);
-
-  if (!parsed.headline || !parsed.summary || signals.length === 0) {
+  if (!parsed.headline || !parsed.summary) {
     return null;
   }
 
   return {
-    headline: normalizeInsightText(parsed.headline, "Club taste snapshot"),
-    summary: normalizeInsightText(parsed.summary, "The club insight is still warming up."),
-    signals,
+    headline: normalizeInsightText(parsed.headline, buildClubInsightHeadline(input)),
+    summary: withPeriod(normalizeInsightText(parsed.summary, "The club insight is still warming up.")),
     source: "ollama",
   };
 }
 
 function buildFallbackClubTasteInsight(input: ClubTasteInsightRequest): ClubTasteInsight {
-  const headline = input.topGenres.length > 0 ? `${input.topGenres[0]} loyalists` : "Club taste snapshot";
-  const currentRead = input.currentReadTitle
-    ? `Right now the club is orbiting around ${input.currentReadTitle}`
-    : "The shelf is still forming its next obsession";
-  const genreSignal =
-    input.topGenres.length > 0
-      ? `The shelf leans most toward ${input.topGenres.slice(0, 2).join(" and ")} picks.`
-      : "The shelf is still broad enough that no single genre dominates yet.";
-  const finishSignal =
-    input.finishedTitles.length > 0
-      ? `${input.finishedTitles.length} finished club reads are already shaping repeat taste patterns.`
-      : "Finished-book history is still light, so the taste profile is being driven by the active shelf.";
-  const authorSignal =
-    input.topAuthors.length > 0
-      ? `Recurring author energy: ${input.topAuthors.slice(0, 2).join(", ")}.`
-      : "The club is still sampling widely rather than locking into one author lane.";
-
+  const headline = input.topGenres.length > 0 ? `${input.topGenres[0]} with taste` : "Shelf with standards";
+  const fallbackSummary = input.currentReadTitle
+    ? `You keep drifting toward ${input.currentReadTitle}-style tension, with enough ${input.topGenres[0] || "bookish"} instinct to make the shelf feel deliberate rather than accidental.`
+    : input.topGenres.length > 0
+      ? `You keep reaching for ${input.topGenres.slice(0, 2).join(" and ")}, which gives the shelf a point of view and just enough menace to stay interesting.`
+      : "Your shelf is still introducing itself, but it already reads like a group that prefers mood, sharp instincts, and a little dramatic tension.";
   return {
     headline,
-    summary: `${currentRead}, with ${input.memberCount} readers pulling the club toward ${input.clubVibe?.toLowerCase() || "a shared reading mood"}.`,
-    signals: [genreSignal, finishSignal, authorSignal],
+    summary: withPeriod(fallbackSummary),
     source: "fallback",
   };
 }

@@ -1,7 +1,8 @@
 import { Platform } from "react-native";
 
+const iosLanFallback = "http://192.168.0.135:4000";
 const defaultBaseUrl =
-  Platform.OS === "android" ? "http://10.0.2.2:4000" : "http://localhost:4000";
+  Platform.OS === "android" ? "http://10.0.2.2:4000" : iosLanFallback;
 
 export const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || defaultBaseUrl;
 

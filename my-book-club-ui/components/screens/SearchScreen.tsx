@@ -1,5 +1,5 @@
 import React from "react";
-import { Modal, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, Text, TextInput, View } from "react-native";
 import { useActionFeedback } from "../../hooks/useActionFeedback";
 import { appStyles } from "../../styles/appStyles";
 import type { SearchScreenActions, SearchScreenModel } from "../../types/screenModels";
@@ -40,6 +40,17 @@ export function SearchScreen({ model, actions }: SearchScreenProps) {
 
       <Card>
         <View style={appStyles.candidateStack}>
+          {model.searchTerm.trim() && model.searchLoading ? (
+            <View style={appStyles.discussionLoadingCard}>
+              <View style={appStyles.discussionLoadingHeader}>
+                <ActivityIndicator size="small" color="#FFD7AE" />
+                <Text style={appStyles.discussionLoadingTitle}>Searching books</Text>
+              </View>
+              <Text style={appStyles.discussionLoadingBody}>
+                Checking your catalog first, then looking wider if needed.
+              </Text>
+            </View>
+          ) : null}
           {model.filteredSearchBooks.slice(0, 6).map((book) => (
             <Pressable
               key={book.id}
@@ -49,6 +60,7 @@ export function SearchScreen({ model, actions }: SearchScreenProps) {
                 pressed ? appStyles.chipPressed : null,
               ]}
               onPress={() => actions.onSelectBook(book.id)}
+              disabled={model.searchLoading}
             >
               <View style={appStyles.searchResultCopy}>
                 <Text style={appStyles.candidateTitle}>{book.title}</Text>
@@ -57,7 +69,12 @@ export function SearchScreen({ model, actions }: SearchScreenProps) {
               <Text style={appStyles.searchResultChevron}>›</Text>
             </Pressable>
           ))}
-          {model.filteredSearchBooks.length === 0 ? <Text style={appStyles.bodyText}>No books matched that search.</Text> : null}
+          {model.searchTerm.trim() && !model.searchLoading && model.filteredSearchBooks.length === 0 ? (
+            <Text style={appStyles.bodyText}>No books matched that search.</Text>
+          ) : null}
+          {!model.searchTerm.trim() ? (
+            <Text style={appStyles.helperText}>Start typing to search your catalog and Open Library.</Text>
+          ) : null}
         </View>
       </Card>
 

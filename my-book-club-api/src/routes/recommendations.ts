@@ -13,6 +13,7 @@ type DiscussionQuestionsBody = {
   title?: string;
   author?: string;
   description?: string;
+  genres?: string;
   clubName?: string;
   clubVibe?: string;
 };
@@ -88,6 +89,12 @@ recommendationsRouter.post(
         title,
         author: req.body?.author?.trim(),
         description: req.body?.description?.trim(),
+        genres: req.body?.genres
+          ? String(req.body.genres)
+              .split(/[,&/]/)
+              .map((value) => value.trim())
+              .filter(Boolean)
+          : [],
         clubName: req.body?.clubName?.trim(),
         clubVibe: req.body?.clubVibe?.trim(),
       });

@@ -171,16 +171,25 @@ export function ClubsScreen({ model, actions }: ClubsScreenProps) {
           <>
           <Card>
             <Text style={appStyles.sectionTitle}>Active club</Text>
-            <Pressable
-              style={({ pressed }) => [appStyles.clubAccordionButton, pressed ? appStyles.chipPressed : null]}
-              onPress={actions.onToggleClubSelector}
-            >
-              <View style={appStyles.clubAccordionCopy}>
-                <Text style={appStyles.clubName}>{model.selectedClub?.name || "Reading club"}</Text>
-                <Text style={appStyles.helperText}>{clubSummary}</Text>
+            {model.showSwitchClub ? (
+              <Pressable
+                style={({ pressed }) => [appStyles.clubAccordionButton, pressed ? appStyles.chipPressed : null]}
+                onPress={actions.onToggleClubSelector}
+              >
+                <View style={appStyles.clubAccordionCopy}>
+                  <Text style={appStyles.clubName}>{model.selectedClub?.name || "Reading club"}</Text>
+                  <Text style={appStyles.helperText}>{clubSummary}</Text>
+                </View>
+                <Text style={appStyles.clubAccordionIcon}>{model.clubSelectorOpen ? "−" : "+"}</Text>
+              </Pressable>
+            ) : (
+              <View style={appStyles.clubAccordionButton}>
+                <View style={appStyles.clubAccordionCopy}>
+                  <Text style={appStyles.clubName}>{model.selectedClub?.name || "Reading club"}</Text>
+                  <Text style={appStyles.helperText}>{clubSummary}</Text>
+                </View>
               </View>
-              <Text style={appStyles.clubAccordionIcon}>{model.clubSelectorOpen ? "−" : "+"}</Text>
-            </Pressable>
+            )}
             {model.clubs.length > 1 && model.clubSelectorOpen ? (
               <View style={appStyles.clubSelector}>
                 {model.clubs.map((club) => (
@@ -294,40 +303,12 @@ export function ClubsScreen({ model, actions }: ClubsScreenProps) {
           </Card>
 
           <Card>
-            <Text style={appStyles.sectionTitle}>Taste snapshot</Text>
+            <Text style={appStyles.sectionTitle}>Club insights</Text>
             <View style={appStyles.statRow}>
               <Stat label="Members" value={String(model.selectedClubMembers.length + 1)} />
               <Stat label="Saved books" value={String(model.favoriteBooksCount)} />
               <Stat label="Finished" value={String(model.finishedBooksCount)} />
             </View>
-            {model.clubInsightLoading ? (
-              <View style={appStyles.discussionLoadingCard}>
-                <View style={appStyles.discussionLoadingHeader}>
-                  <ActivityIndicator size="small" color="#FFD7AE" />
-                  <Text style={appStyles.discussionLoadingTitle}>Reading the club shelf</Text>
-                </View>
-                <Text style={appStyles.discussionLoadingBody}>
-                  Pulling real signals from saved books, finished reads, and the current pick.
-                </Text>
-              </View>
-            ) : model.clubInsight ? (
-              <View style={appStyles.stack}>
-                <View style={appStyles.tasteInsightHeader}>
-                  <Text style={appStyles.tasteInsightHeadline}>{model.clubInsight.headline}</Text>
-                  <Text style={appStyles.helperText}>{model.clubInsight.summary}</Text>
-                </View>
-                {model.clubInsight.signals.map((signal, index) => (
-                  <View key={`${index}-${signal}`} style={appStyles.discussionQuestionCard}>
-                    <View style={appStyles.discussionQuestionRow}>
-                      <Text style={appStyles.discussionQuestionIndex}>•</Text>
-                      <Text style={appStyles.discussionQuestionText}>{signal}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={appStyles.helperText}>The club insight is still warming up from live reading data.</Text>
-            )}
             {model.booksLoading ? <Text style={appStyles.helperText}>Loading books from API...</Text> : null}
             {model.booksError ? <Text style={appStyles.errorText}>{model.booksError}</Text> : null}
           </Card>

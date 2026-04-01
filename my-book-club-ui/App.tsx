@@ -14,7 +14,13 @@ export default function App() {
       <SafeAreaView style={appStyles.safeArea}>
         <StatusBar barStyle="dark-content" />
         <View style={appStyles.appShell}>
-          <AppHeader kicker={header.kicker} title={header.title} subtitle={header.subtitle} />
+          <AppHeader
+            kicker={header.kicker}
+            title={header.title}
+            subtitle={header.subtitle}
+            onProfilePress={() => navigation.setScreen("profile")}
+            profileActive={navigation.screen === "profile"}
+          />
           <AppNavigator screen={navigation.screen} onScreenChange={navigation.setScreen} views={views} />
         </View>
       </SafeAreaView>

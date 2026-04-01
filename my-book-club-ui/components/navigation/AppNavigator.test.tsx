@@ -40,12 +40,12 @@ describe("AppNavigator", () => {
 
     fireEvent.press(getByText("Home"));
     fireEvent.press(getByText("Clubs"));
+    fireEvent.press(getByText("Picker"));
     fireEvent.press(getByText("Library"));
-    fireEvent.press(getByText("Profile"));
 
     expect(onScreenChange).toHaveBeenNthCalledWith(1, "home");
     expect(onScreenChange).toHaveBeenNthCalledWith(2, "clubs");
-    expect(onScreenChange).toHaveBeenNthCalledWith(3, "library");
-    expect(onScreenChange).toHaveBeenNthCalledWith(4, "profile");
+    expect(onScreenChange).toHaveBeenNthCalledWith(3, "pick-next");
+    expect(onScreenChange).toHaveBeenNthCalledWith(4, "library");
   });
 });

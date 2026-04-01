@@ -38,8 +38,8 @@ export function AppNavigator({
         <NavButton icon="⌂" label="Home" active={screen === "home"} onPress={() => onScreenChange("home")} />
         <NavButton icon="◫" label="Clubs" active={screen === "clubs"} onPress={() => onScreenChange("clubs")} />
         <NavButton icon="⌕" label="Search" active={screen === "search"} onPress={() => onScreenChange("search")} />
+        <NavButton icon="◎" label="Picker" active={screen === "pick-next"} onPress={() => onScreenChange("pick-next")} />
         <NavButton icon="☰" label="Library" active={screen === "library"} onPress={() => onScreenChange("library")} />
-        <NavButton icon="◌" label="Profile" active={screen === "profile"} onPress={() => onScreenChange("profile")} />
       </View>
     </>
   );

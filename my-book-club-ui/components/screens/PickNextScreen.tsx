@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Animated, Image, Pressable, Text, TextInput, View } from "react-native";
 import Svg, { Circle, G, Line, Path, Text as SvgText } from "react-native-svg";
 import { getBookCoverUrl } from "../../data/bookCoverFallbacks";
@@ -17,16 +17,110 @@ type PickNextScreenProps = {
   actions: PickNextScreenActions;
 };
 
+const AI_PICKER_STATUS_ROTATION = [
+  {
+    eyebrow: "AI scout in progress",
+    title: "Scanning shelves, moods, and chart energy...",
+    body: "Pulling together picks that feel right for the club instead of just matching a keyword.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Checking what your club saves versus what it actually finishes...",
+    body: "Trying to find the overlap between ambition, taste, and books people will genuinely want to discuss.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Letting the catalog speak before the model gets too dramatic...",
+    body: "Fast retrieval is narrowing the field while the AI looks for something more curated than the obvious answer.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Pressure-testing a few strong candidates for club chemistry...",
+    body: "Balancing tone, momentum, and whether this pick sounds like a conversation waiting to happen.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Checking whether the club wants messy, smart, or both...",
+    body: "Trying to match the real appetite of the group instead of just parroting the prompt back.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Comparing bold picks with books people will actually finish...",
+    body: "A great club choice should start debates, not just gather dust on the shelf.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Auditioning a shortlist with main-character energy...",
+    body: "The obvious candidates made the room. Now the better ones are fighting for the final spot.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Separating true matches from books that are merely adjacent...",
+    body: "Genre overlap is easy. Finding the right tone and discussion potential is the harder part.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Checking if this pick feels like a meeting or a conversation...",
+    body: "The AI is steering away from books that sound respectable but dead on arrival.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Weighing shelf taste against actual club stamina...",
+    body: "Ambitious picks are great until nobody finishes them, so this is getting screened for follow-through too.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Trying not to recommend the same five books the internet always does...",
+    body: "If a less predictable match fits better, it gets extra credit here.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Checking whether this book has enough spark for a full discussion...",
+    body: "The right club pick should give people something to argue about besides scheduling.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Letting the fast search narrow the field before taste takes over...",
+    body: "First the catalog speaks, then the AI decides which candidates actually deserve your attention.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Looking for the kind of pick that makes everyone say 'fine, I’m in'...",
+    body: "The shortlist is being trimmed for momentum, mood, and whether the club can rally behind it.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Cross-checking taste with how dramatic your next meeting should be...",
+    body: "A little friction is healthy. Total indifference is not. This is aiming for the good kind of tension.",
+  },
+];
 export function PickNextScreen({ model, actions }: PickNextScreenProps) {
   const { labels, runWithFeedback } = useActionFeedback();
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [bookDetailsLoading, setBookDetailsLoading] = useState(false);
+  const [aiStatusIndex, setAiStatusIndex] = useState(0);
   const getBookLookupKey = (book: Pick<Book, "title" | "author">) =>
     `${book.title.trim().toLowerCase()}::${book.author.trim().toLowerCase()}`;
   const wheelWinnerIsPicked = model.wheelResult
     ? model.currentPickedBookId === model.wheelResult.id ||
       model.currentPickedBookKeys.includes(getBookLookupKey(model.wheelResult))
     : false;
+
+  useEffect(() => {
+    if (!model.aiPickerLoading) {
+      setAiStatusIndex(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setAiStatusIndex((current) => (current + 1) % AI_PICKER_STATUS_ROTATION.length);
+    }, 1700);
+
+    return () => clearInterval(interval);
+  }, [model.aiPickerLoading]);
+
+  const aiStatus = AI_PICKER_STATUS_ROTATION[aiStatusIndex] ?? AI_PICKER_STATUS_ROTATION[0];
+
   const renderSuggestedBookCard = (book: Book & { matchReason?: string }) => (
     <View key={book.id} style={appStyles.candidateRow}>
       <View style={appStyles.aiSuggestionCardTop}>
@@ -130,7 +224,7 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
         <Card accent>
           <Text style={appStyles.sectionTitle}>Randomizer</Text>
           <Text style={appStyles.bodyText}>
-            Shuffle from the books saved by {model.selectedClub?.name || "your club"} and let luck pick the next read.
+            Shuffle the club's Want to Read shelf and let luck pick the next read.
           </Text>
           <View style={appStyles.candidateStack}>
             {model.randomizerPool.slice(0, 3).map((book) => (
@@ -156,7 +250,7 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
               <Text style={appStyles.randomizerWinnerTitle}>{model.randomizerResult.title}</Text>
               <Text style={appStyles.randomizerWinnerMeta}>{model.randomizerResult.author}</Text>
               <Text style={appStyles.randomizerWinnerBody}>
-                The randomizer landed here from the current club shelf.
+                Picked from the shared Want to Read shelf for this club.
               </Text>
             </View>
           ) : null}
@@ -403,17 +497,15 @@ export function PickNextScreen({ model, actions }: PickNextScreenProps) {
           </Pressable>
           {model.aiPickerLoading ? (
             <View style={appStyles.aiStatusCard}>
-              <Text style={appStyles.aiStatusEyebrow}>AI scouting in progress</Text>
-              <Text style={appStyles.aiStatusTitle}>Scanning shelves, moods, and chart energy...</Text>
-              <Text style={appStyles.aiStatusBody}>
-                Pulling together picks that feel right for the club instead of just matching a keyword.
-              </Text>
+              <Text style={appStyles.aiStatusEyebrow}>{aiStatus.eyebrow}</Text>
+              <Text style={appStyles.aiStatusTitle}>{aiStatus.title}</Text>
+              <Text style={appStyles.aiStatusBody}>{aiStatus.body}</Text>
             </View>
           ) : null}
-          {model.aiPickerGenerated ? (
+          {(!model.aiPickerLoading && model.aiPickerGenerated) || model.aiPickerRecommendations.length > 0 ? (
             model.aiPickerRecommendations.length > 0 ? (
               <View style={appStyles.candidateStack}>
-                {model.aiPickerRecommendations.slice(0, 3).map((book, index) =>
+                {model.aiPickerRecommendations.slice(0, 5).map((book, index) =>
                   renderSuggestedBookCard({
                     ...book,
                     matchReason: index === 0 ? undefined : book.matchReason,

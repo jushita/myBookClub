@@ -6,9 +6,11 @@ import type { AuthUser, Book, Club, ClubLibraryEntry } from "../types";
 export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, setCurrentClubBook?: (title: string) => void) {
   const [libraryEntries, setLibraryEntries] = useState<ClubLibraryEntry[]>([]);
   const [finishedEntries, setFinishedEntries] = useState<ClubLibraryEntry[]>([]);
+  const [clubSavedEntries, setClubSavedEntries] = useState<ClubLibraryEntry[]>([]);
   const [clubFinishedEntries, setClubFinishedEntries] = useState<ClubLibraryEntry[]>([]);
   const [favoriteBooks, setFavoriteBooks] = useState<Book[]>([]);
   const [finishedBooks, setFinishedBooks] = useState<Book[]>([]);
+  const [clubSavedBooks, setClubSavedBooks] = useState<Book[]>([]);
   const [clubFinishedBooks, setClubFinishedBooks] = useState<Book[]>([]);
   const [booksLoading, setBooksLoading] = useState(false);
   const [booksError, setBooksError] = useState<string | null>(null);
@@ -60,21 +62,30 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
     if (!nextAuthUser || !nextSelectedClub) {
       setLibraryEntries([]);
       setFinishedEntries([]);
+      setClubSavedEntries([]);
       setClubFinishedEntries([]);
       setFavoriteBooks([]);
       setFinishedBooks([]);
+      setClubSavedBooks([]);
       setClubFinishedBooks([]);
       setCurrentClubBook?.("");
       return;
     }
 
-    const [{ entries, currentBookTitle }, { entries: clubFinishedEntriesFromApi, books: clubFinished }] = await Promise.all([
+    const [
+      { entries, currentBookTitle },
+      { entries: clubSavedEntriesFromApi, books: clubSaved },
+      { entries: clubFinishedEntriesFromApi, books: clubFinished },
+    ] = await Promise.all([
       fetchClubBooks(nextSelectedClub.id, nextAuthUser.id),
+      fetchClubBooks(nextSelectedClub.id, undefined, "saved"),
       fetchClubBooks(nextSelectedClub.id, undefined, "finished"),
     ]);
 
     setLibraryEntries(entries);
     syncShelfState(entries);
+    setClubSavedEntries(clubSavedEntriesFromApi);
+    setClubSavedBooks(clubSaved);
     setClubFinishedEntries(clubFinishedEntriesFromApi);
     setClubFinishedBooks(clubFinished);
     setCurrentClubBook?.(currentBookTitle || getCurrentClubBookTitle(entries));
@@ -84,9 +95,11 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
     if (!authUser || !selectedClub) {
       setLibraryEntries([]);
       setFinishedEntries([]);
+      setClubSavedEntries([]);
       setClubFinishedEntries([]);
       setFavoriteBooks([]);
       setFinishedBooks([]);
+      setClubSavedBooks([]);
       setClubFinishedBooks([]);
       setCurrentClubBook?.("");
       setBooksLoading(false);
@@ -379,9 +392,11 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
   const resetLibrary = () => {
     setLibraryEntries([]);
     setFinishedEntries([]);
+    setClubSavedEntries([]);
     setClubFinishedEntries([]);
     setFavoriteBooks([]);
     setFinishedBooks([]);
+    setClubSavedBooks([]);
     setClubFinishedBooks([]);
     setCurrentClubBook?.("");
     setBooksError(null);
@@ -390,10 +405,12 @@ export function useBookLibrary(authUser: AuthUser | null, selectedClub?: Club, s
   return {
     libraryEntries,
     finishedEntries,
+    clubSavedEntries,
     clubFinishedEntries,
     currentReadingEntry: currentClubEntry,
     favoriteBooks,
     finishedBooks,
+    clubSavedBooks,
     clubFinishedBooks,
     currentClubBookId: currentClubEntry?.book.id ?? null,
     currentClubBookTitle: currentClubEntry?.book.title ?? "",

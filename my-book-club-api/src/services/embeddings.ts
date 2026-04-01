@@ -1,6 +1,9 @@
+import { getCachedJson, setCachedJson } from "./cache.js";
+
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_OLLAMA_EMBED_MODEL = "mxbai-embed-large";
 const EMBEDDING_CACHE_TTL_MS = 10 * 60 * 1000;
+const EMBEDDING_CACHE_TTL_SECONDS = Math.floor(EMBEDDING_CACHE_TTL_MS / 1000);
 const embeddingCache = new Map<string, { expiresAt: number; value: { embedding: number[]; model: string } | null }>();
 const pendingEmbeddings = new Map<string, Promise<{ embedding: number[]; model: string } | null>>();
 
@@ -40,6 +43,15 @@ export async function embedTextWithOllama(text: string): Promise<{ embedding: nu
     return cached.value;
   }
 
+  const redisCached = await getCachedJson<{ embedding: number[]; model: string } | null>(`embeddings:${cacheKey}`);
+  if (redisCached !== null) {
+    embeddingCache.set(cacheKey, {
+      expiresAt: Date.now() + EMBEDDING_CACHE_TTL_MS,
+      value: redisCached,
+    });
+    return redisCached;
+  }
+
   const pending = pendingEmbeddings.get(cacheKey);
   if (pending) {
     return pending;
@@ -67,6 +79,7 @@ export async function embedTextWithOllama(text: string): Promise<{ embedding: nu
           expiresAt: Date.now() + EMBEDDING_CACHE_TTL_MS,
           value: null,
         });
+        await setCachedJson(`embeddings:${cacheKey}`, null, EMBEDDING_CACHE_TTL_SECONDS);
         return null;
       }
 
@@ -78,6 +91,7 @@ export async function embedTextWithOllama(text: string): Promise<{ embedding: nu
         expiresAt: Date.now() + EMBEDDING_CACHE_TTL_MS,
         value,
       });
+      await setCachedJson(`embeddings:${cacheKey}`, value, EMBEDDING_CACHE_TTL_SECONDS);
       return value;
     })
     .finally(() => {

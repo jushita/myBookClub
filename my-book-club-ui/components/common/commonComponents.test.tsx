@@ -55,16 +55,20 @@ describe("common UI components", () => {
     expect(getByText("12")).toBeTruthy();
   });
 
-  it("renders header title/subtitle only when provided", () => {
-    const { getByText, queryByText, rerender } = render(
-      <AppHeader kicker="Today" title="My Book Club" subtitle="Mood-driven picks" />
+  it("renders header title/subtitle only when provided and opens profile", () => {
+    const onProfilePress = jest.fn();
+    const { getByLabelText, getByText, queryByText, rerender } = render(
+      <AppHeader kicker="Today" title="My Book Club" subtitle="Mood-driven picks" onProfilePress={onProfilePress} />
     );
 
     expect(getByText("Today")).toBeTruthy();
     expect(getByText("My Book Club")).toBeTruthy();
     expect(getByText("Mood-driven picks")).toBeTruthy();
+    fireEvent.press(getByLabelText("Open profile"));
 
-    rerender(<AppHeader kicker="Today" title={null} subtitle={null} />);
+    expect(onProfilePress).toHaveBeenCalledTimes(1);
+
+    rerender(<AppHeader kicker="Today" title={null} subtitle={null} onProfilePress={onProfilePress} />);
 
     expect(queryByText("My Book Club")).toBeNull();
     expect(queryByText("Mood-driven picks")).toBeNull();

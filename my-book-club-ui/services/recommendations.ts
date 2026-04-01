@@ -29,12 +29,29 @@ type DiscussionQuestionsResponse = {
   questions: string[];
 };
 
-export async function fetchRecommendedBooks(prompt: string, limit = 6): Promise<RecommendationResult> {
+export async function fetchRecommendedBooks(
+  prompt: string,
+  limit = 6,
+  context?: {
+    clubId?: string;
+    currentBookId?: string | null;
+    shelfFingerprint?: string;
+    excludeBookIds?: string[];
+    qualityMode?: "fast" | "full";
+    hasExplicitPrompt?: boolean;
+  }
+): Promise<RecommendationResult> {
   const data = await requestJson<RecommendationResponse>(`${apiBaseUrl}/api/recommendations/books`, {
     method: "POST",
     body: JSON.stringify({
       prompt,
       limit,
+      clubId: context?.clubId,
+      currentBookId: context?.currentBookId ?? null,
+      shelfFingerprint: context?.shelfFingerprint,
+      excludeBookIds: context?.excludeBookIds ?? [],
+      qualityMode: context?.qualityMode ?? "fast",
+      hasExplicitPrompt: context?.hasExplicitPrompt ?? false,
     }),
   });
 

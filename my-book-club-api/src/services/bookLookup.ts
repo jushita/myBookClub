@@ -1,6 +1,8 @@
 import { Book as BookEntity } from "../domain/entities/Book.js";
 import type { Book } from "../domain/entities/Book.js";
 import { updateBookEnrichment } from "../repositories/books.js";
+import { getCachedJson, setCachedJson } from "./cache.js";
+import { dedupeBooksByCompleteness } from "./bookDeduplication.js";
 
 type SearchFallbackParams = {
   query?: string;
@@ -37,6 +39,7 @@ type GoogleBooksItem = {
 };
 
 const LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000;
+const LOOKUP_CACHE_TTL_SECONDS = Math.floor(LOOKUP_CACHE_TTL_MS / 1000);
 const metadataCache = new Map<string, { expiresAt: number; book: Book }>();
 const queryCache = new Map<string, { expiresAt: number; books: Book[] }>();
 
@@ -152,6 +155,14 @@ function buildOpenLibraryBlurb(doc: OpenLibraryDoc): string {
   return `A ${subjects.join(", ").toLowerCase()} pick by ${author}.${year}`.trim();
 }
 
+function serializeBook(book: Book) {
+  return book.toJSON();
+}
+
+function deserializeBook(book: ReturnType<Book["toJSON"]>): Book {
+  return new BookEntity(book);
+}
+
 function shouldPersistEnrichment(original: Book, enriched: Book): boolean {
   return (
     original.genre !== enriched.genre ||
@@ -245,6 +256,13 @@ export async function enrichBookFromExternalSources(book: Book): Promise<Book> {
     return cached;
   }
 
+  const redisCached = await getCachedJson<ReturnType<Book["toJSON"]>>(`bookLookup:metadata:${cacheKey}`);
+  if (redisCached) {
+    const redisBook = deserializeBook(redisCached);
+    cacheSet(metadataCache, cacheKey, "book", redisBook);
+    return redisBook;
+  }
+
   let workingBook = book;
 
   const isbnCoverUrl =
@@ -279,6 +297,7 @@ export async function enrichBookFromExternalSources(book: Book): Promise<Book> {
       });
       await persistEnrichedBookIfChanged(book, enriched);
       cacheSet(metadataCache, cacheKey, "book", enriched);
+      await setCachedJson(`bookLookup:metadata:${cacheKey}`, serializeBook(enriched), LOOKUP_CACHE_TTL_SECONDS);
       return enriched;
     }
   } catch {
@@ -301,6 +320,7 @@ export async function enrichBookFromExternalSources(book: Book): Promise<Book> {
       });
       await persistEnrichedBookIfChanged(book, enriched);
       cacheSet(metadataCache, cacheKey, "book", enriched);
+      await setCachedJson(`bookLookup:metadata:${cacheKey}`, serializeBook(enriched), LOOKUP_CACHE_TTL_SECONDS);
       return enriched;
     }
   } catch {
@@ -308,6 +328,7 @@ export async function enrichBookFromExternalSources(book: Book): Promise<Book> {
   }
 
   cacheSet(metadataCache, cacheKey, "book", workingBook);
+  await setCachedJson(`bookLookup:metadata:${cacheKey}`, serializeBook(workingBook), LOOKUP_CACHE_TTL_SECONDS);
   return workingBook;
 }
 
@@ -315,25 +336,45 @@ export async function searchBooksWithFallback(params: SearchFallbackParams, loca
   const cacheKey = getQueryCacheKey(params);
   const cached = cacheGet<Book[]>(queryCache, cacheKey, "books");
   if (cached) {
-    return cached;
+    return dedupeBooksByCompleteness(cached);
   }
 
-  if (localBooks.length > 0 && hasStrongLocalMatch(params, localBooks)) {
-    const enriched = await Promise.all(localBooks.map((book) => enrichBookFromExternalSources(book)));
+  const redisCached = await getCachedJson<ReturnType<Book["toJSON"]>[]>(`bookLookup:query:${cacheKey}`);
+  if (redisCached) {
+    const redisBooks = dedupeBooksByCompleteness(redisCached.map((book) => deserializeBook(book)));
+    cacheSet(queryCache, cacheKey, "books", redisBooks);
+    return redisBooks;
+  }
+
+  const uniqueLocalBooks = dedupeBooksByCompleteness(localBooks);
+
+  if (uniqueLocalBooks.length > 0 && hasStrongLocalMatch(params, uniqueLocalBooks)) {
+    const enriched = dedupeBooksByCompleteness(await Promise.all(uniqueLocalBooks.map((book) => enrichBookFromExternalSources(book))));
     cacheSet(queryCache, cacheKey, "books", enriched);
+    await setCachedJson(
+      `bookLookup:query:${cacheKey}`,
+      enriched.map((book) => serializeBook(book)),
+      LOOKUP_CACHE_TTL_SECONDS
+    );
     return enriched;
   }
 
   const fallbackQuery = [params.query, params.genre].filter(Boolean).join(" ").trim();
   if (!fallbackQuery) {
     cacheSet(queryCache, cacheKey, "books", []);
+    await setCachedJson(`bookLookup:query:${cacheKey}`, [], LOOKUP_CACHE_TTL_SECONDS);
     return [];
   }
 
   try {
-    const openLibraryBooks = await searchOpenLibrary(fallbackQuery, params.limit);
+    const openLibraryBooks = dedupeBooksByCompleteness(await searchOpenLibrary(fallbackQuery, params.limit));
     if (openLibraryBooks.length > 0) {
       cacheSet(queryCache, cacheKey, "books", openLibraryBooks);
+      await setCachedJson(
+        `bookLookup:query:${cacheKey}`,
+        openLibraryBooks.map((book) => serializeBook(book)),
+        LOOKUP_CACHE_TTL_SECONDS
+      );
       return openLibraryBooks;
     }
   } catch {
@@ -341,21 +382,32 @@ export async function searchBooksWithFallback(params: SearchFallbackParams, loca
   }
 
   try {
-    const googleBooks = await searchGoogleBooks(fallbackQuery, params.limit);
+    const googleBooks = dedupeBooksByCompleteness(await searchGoogleBooks(fallbackQuery, params.limit));
     if (googleBooks.length > 0) {
       cacheSet(queryCache, cacheKey, "books", googleBooks);
+      await setCachedJson(
+        `bookLookup:query:${cacheKey}`,
+        googleBooks.map((book) => serializeBook(book)),
+        LOOKUP_CACHE_TTL_SECONDS
+      );
       return googleBooks;
     }
   } catch {
     // ignore and fall back to local results if they exist
   }
 
-  if (localBooks.length > 0) {
-    const enriched = await Promise.all(localBooks.map((book) => enrichBookFromExternalSources(book)));
+  if (uniqueLocalBooks.length > 0) {
+    const enriched = dedupeBooksByCompleteness(await Promise.all(uniqueLocalBooks.map((book) => enrichBookFromExternalSources(book))));
     cacheSet(queryCache, cacheKey, "books", enriched);
+    await setCachedJson(
+      `bookLookup:query:${cacheKey}`,
+      enriched.map((book) => serializeBook(book)),
+      LOOKUP_CACHE_TTL_SECONDS
+    );
     return enriched;
   }
 
   cacheSet(queryCache, cacheKey, "books", []);
+  await setCachedJson(`bookLookup:query:${cacheKey}`, [], LOOKUP_CACHE_TTL_SECONDS);
   return [];
 }

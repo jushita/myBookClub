@@ -67,6 +67,28 @@ export const appStyles = StyleSheet.create({
     marginTop: 8,
     maxWidth: 330,
   },
+  headerProfileButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.62)",
+    shadowColor: "#5D2F96",
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
+  },
+  headerProfileButtonActive: {
+    backgroundColor: "rgba(255, 191, 109, 0.24)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
+  },
+  headerProfileButtonPressed: {
+    opacity: 0.88,
+  },
   content: {
     padding: 22,
     paddingTop: 16,

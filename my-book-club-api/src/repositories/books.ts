@@ -9,6 +9,10 @@ type BookSearchFilters = {
   limit?: number;
 };
 
+function normalizeSeedList(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean)));
+}
+
 function toVectorLiteral(values: number[] | null | undefined): string | null {
   if (!values || values.length === 0) {
     return null;
@@ -245,6 +249,62 @@ export async function listBooksByIds(ids: string[]): Promise<Book[]> {
      WHERE id = ANY($1::text[])
      ORDER BY popularity_score DESC, created_at DESC`,
     [ids]
+  );
+
+  return result.rows.map((row) => Book.fromDatabase(row));
+}
+
+export async function listBooksByAuthorSeeds(authorSeeds: string[], limit = 20): Promise<Book[]> {
+  const normalizedSeeds = normalizeSeedList(authorSeeds);
+
+  if (normalizedSeeds.length === 0) {
+    return [];
+  }
+
+  const clauses: string[] = [];
+  const values: string[] = [];
+
+  for (const seed of normalizedSeeds) {
+    values.push(seed, `%${seed}%`);
+    const exactIndex = values.length - 1;
+    const likeIndex = values.length;
+    clauses.push(`LOWER(author) = $${exactIndex} OR LOWER(author) LIKE $${likeIndex}`);
+  }
+
+  const result = await pool.query(
+    `${getSelectClause()}
+     WHERE ${clauses.map((clause) => `(${clause})`).join(" OR ")}
+     ORDER BY popularity_score DESC, created_at DESC
+     LIMIT ${Math.min(Math.max(limit, 1), 100)}`,
+    values
+  );
+
+  return result.rows.map((row) => Book.fromDatabase(row));
+}
+
+export async function listBooksByTitleSeeds(titleSeeds: string[], limit = 20): Promise<Book[]> {
+  const normalizedSeeds = normalizeSeedList(titleSeeds);
+
+  if (normalizedSeeds.length === 0) {
+    return [];
+  }
+
+  const clauses: string[] = [];
+  const values: string[] = [];
+
+  for (const seed of normalizedSeeds) {
+    values.push(seed, `%${seed}%`);
+    const exactIndex = values.length - 1;
+    const likeIndex = values.length;
+    clauses.push(`LOWER(title) = $${exactIndex} OR LOWER(title) LIKE $${likeIndex}`);
+  }
+
+  const result = await pool.query(
+    `${getSelectClause()}
+     WHERE ${clauses.map((clause) => `(${clause})`).join(" OR ")}
+     ORDER BY popularity_score DESC, created_at DESC
+     LIMIT ${Math.min(Math.max(limit, 1), 100)}`,
+    values
   );
 
   return result.rows.map((row) => Book.fromDatabase(row));

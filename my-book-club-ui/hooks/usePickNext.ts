@@ -8,9 +8,7 @@ type PickMode = "randomizer" | "wheel" | "ai";
 export function usePickNext(
   selectedClub: Club | undefined,
   _selectedClubMembersCount: number,
-  guestLibraryBooks: Book[],
-  favoriteBooks: Book[],
-  authUser: unknown,
+  clubSavedBooks: Book[],
   aiRecommendations: Recommendation[],
   wheelEngine: WheelEngine,
   onSearchBooks?: (query: string) => Promise<Book[]>
@@ -32,13 +30,7 @@ export function usePickNext(
   const wheelSpin = useRef(new Animated.Value(0)).current;
   const wheelSearchSequence = useRef(0);
 
-  const randomizerPool = useMemo(() => {
-    if (authUser && favoriteBooks.length > 0) {
-      return favoriteBooks;
-    }
-
-    return guestLibraryBooks;
-  }, [authUser, favoriteBooks, guestLibraryBooks]);
+  const randomizerPool = useMemo(() => clubSavedBooks, [clubSavedBooks]);
 
   const maxWheelBooks = 7;
   const wheelRotation = wheelSpin.interpolate({
@@ -128,7 +120,7 @@ export function usePickNext(
 
   const runRandomizer = () => {
     if (randomizerPool.length === 0) {
-      Alert.alert("No books to randomize", "Add or load books before running the randomizer.");
+      Alert.alert("No books to randomize", "Add books to the club Want to Read shelf before running the randomizer.");
       return;
     }
 

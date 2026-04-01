@@ -35,6 +35,12 @@ The backend API project now lives in `my-book-club-api/`.
    `cd my-book-club-ui && npm run start:clear`
 3. Open the installed `myBookClub` app in the iOS simulator
 
+### One-command local stack
+
+From the repo root you can start Redis, Ollama, the API, and Expo together with:
+
+`bash scripts/run-dev.sh`
+
 ### Google auth development flow
 
 Google sign-in will not work correctly in Expo Go for this project. Use a native development build.
@@ -48,6 +54,7 @@ Google sign-in will not work correctly in Expo Go for this project. Use a native
 ### Notes
 
 - If you run the app on a physical device, set `EXPO_PUBLIC_API_BASE_URL=http://YOUR_MAC_IP:4000`
+- To enable Redis-backed backend caching, set `REDIS_URL=redis://127.0.0.1:6379` in `my-book-club-api/.env`
 - Google auth expects iOS, Android, and web client IDs in `my-book-club-ui/.env`
 
 ### Useful UI commands

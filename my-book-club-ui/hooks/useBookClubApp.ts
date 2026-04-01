@@ -24,6 +24,27 @@ import type { AppScreenViews } from "../types/screenModels";
 import type { Book } from "../types";
 
 WebBrowser.maybeCompleteAuthSession();
+const AI_PICK_BATCH_SIZE = 5;
+const AI_PICK_POOL_FETCH_SIZE = 24;
+const AI_PICK_PARTIAL_BATCH_SIZE = 2;
+
+function mergeUniqueById<T extends { id: string }>(...groups: T[][]): T[] {
+  const seen = new Set<string>();
+  const merged: T[] = [];
+
+  for (const group of groups) {
+    for (const item of group) {
+      if (seen.has(item.id)) {
+        continue;
+      }
+
+      seen.add(item.id);
+      merged.push(item);
+    }
+  }
+
+  return merged;
+}
 
 export function useBookClubApp() {
   const recommendationEngine = useMemo(() => new RecommendationEngine([]), []);
@@ -39,6 +60,9 @@ export function useBookClubApp() {
   const [aiPickerExplanation, setAiPickerExplanation] = useState<string | null>(null);
   const [aiPickerSource, setAiPickerSource] = useState<string | null>(null);
   const [aiPickerLoading, setAiPickerLoading] = useState(false);
+  const [aiPickerSeenBookIds, setAiPickerSeenBookIds] = useState<string[]>([]);
+  const [aiPickerQueuedRecommendations, setAiPickerQueuedRecommendations] = useState<typeof MOCK_RECOMMENDATIONS>([]);
+  const [aiPickerContextKey, setAiPickerContextKey] = useState("");
   const [catalogBooks, setCatalogBooks] = useState<Book[]>([]);
   const [discussionQuestions, setDiscussionQuestions] = useState<string[]>([]);
   const [discussionQuestionsLoading, setDiscussionQuestionsLoading] = useState(false);
@@ -47,6 +71,12 @@ export function useBookClubApp() {
   const [clubInsightLoading, setClubInsightLoading] = useState(false);
   const personalizedRotationSeed = useRef<number>(Date.now()).current;
   const discussionRequestRef = useRef<Promise<{ currentBookId: string | null; questions: string[] }> | null>(null);
+  const aiRecommendationPrefetchRef = useRef<Promise<Awaited<ReturnType<typeof fetchRecommendedBooks>> | null> | null>(null);
+  const aiRecommendationRequestIdRef = useRef(0);
+  const aiPickerSeenBookIdsRef = useRef<string[]>([]);
+  const aiPickerQueuedRecommendationsRef = useRef<typeof MOCK_RECOMMENDATIONS>([]);
+  const aiPickerContextKeyRef = useRef("");
+  const aiPickerRecommendationsRef = useRef<typeof MOCK_RECOMMENDATIONS>([]);
 
   useEffect(() => {
     const currentAuthUserId = auth.authUser?.id ?? null;
@@ -113,6 +143,19 @@ export function useBookClubApp() {
   }, [library.libraryEntries]);
 
   const currentClubBookDetails = library.currentClubBookDetails;
+  const recommendationShelfFingerprint = useMemo(() => {
+    const savedIds = library.clubSavedEntries
+      .map((entry) => entry.bookId)
+      .sort()
+      .join(",");
+    const finishedIds = library.clubFinishedEntries
+      .map((entry) => entry.bookId)
+      .sort()
+      .join(",");
+    const currentBookId = library.currentClubBookId ?? "none";
+
+    return `saved:${savedIds}|finished:${finishedIds}|current:${currentBookId}`;
+  }, [library.clubFinishedEntries, library.clubSavedEntries, library.currentClubBookId]);
 
   const clubRecommendations = useMemo(() => {
     if (catalogBooks.length === 0) {
@@ -187,20 +230,187 @@ export function useBookClubApp() {
   const pickNext = usePickNext(
     clubs.selectedClub,
     clubs.selectedClubMembers.length,
-    guestLibraryBooks,
-    library.favoriteBooks,
-    auth.authUser,
+    library.clubSavedBooks,
     aiPickerRecommendations,
     wheelEngine,
     searchBooksFromApi
   );
+  const activeAiQuery = useMemo(
+    () => pickNext.aiPickerPrompt.trim() || clubs.selectedClub?.promptSeed || "book club taste",
+    [clubs.selectedClub?.promptSeed, pickNext.aiPickerPrompt]
+  );
+  const hasExplicitAiPrompt = useMemo(() => Boolean(pickNext.aiPickerPrompt.trim()), [pickNext.aiPickerPrompt]);
+  const activeAiContextKey = useMemo(
+    () =>
+      `${clubs.selectedClub?.id || "none"}::${currentClubBookDetails?.id || "none"}::${recommendationShelfFingerprint}::${activeAiQuery
+        .trim()
+        .toLowerCase()}`,
+    [clubs.selectedClub?.id, currentClubBookDetails?.id, recommendationShelfFingerprint, activeAiQuery]
+  );
+
+  useEffect(() => {
+    aiPickerSeenBookIdsRef.current = aiPickerSeenBookIds;
+  }, [aiPickerSeenBookIds]);
+
+  useEffect(() => {
+    aiPickerQueuedRecommendationsRef.current = aiPickerQueuedRecommendations;
+  }, [aiPickerQueuedRecommendations]);
+
+  useEffect(() => {
+    aiPickerContextKeyRef.current = aiPickerContextKey;
+  }, [aiPickerContextKey]);
+
+  useEffect(() => {
+    aiPickerRecommendationsRef.current = aiPickerRecommendations;
+  }, [aiPickerRecommendations]);
+
+  const consumeQueuedAiRecommendations = () => {
+    if (aiPickerContextKeyRef.current !== activeAiContextKey || aiPickerQueuedRecommendationsRef.current.length === 0) {
+      return false;
+    }
+
+    const visibleIds = new Set(aiPickerRecommendationsRef.current.map((book) => book.id));
+    const queueWithoutVisible = aiPickerQueuedRecommendationsRef.current.filter((book) => !visibleIds.has(book.id));
+    const nextBatch = queueWithoutVisible.slice(0, AI_PICK_BATCH_SIZE);
+    const remainingQueue = queueWithoutVisible.slice(nextBatch.length);
+
+    if (nextBatch.length === 0) {
+      setAiPickerQueuedRecommendations([]);
+      aiPickerQueuedRecommendationsRef.current = [];
+      return false;
+    }
+
+    const nextSeenIds = [
+      ...aiPickerSeenBookIdsRef.current,
+      ...nextBatch.map((book) => book.id).filter((id) => !aiPickerSeenBookIdsRef.current.includes(id)),
+    ];
+
+    setAiPickerRecommendations(nextBatch);
+    setAiPickerQueuedRecommendations(remainingQueue);
+    setAiPickerSeenBookIds(nextSeenIds);
+    aiPickerRecommendationsRef.current = nextBatch;
+    aiPickerQueuedRecommendationsRef.current = remainingQueue;
+    aiPickerSeenBookIdsRef.current = nextSeenIds;
+    pickNext.generateAiPick();
+    return true;
+  };
 
   useEffect(() => {
     setAiPickerRecommendations([]);
     setAiPickerExplanation(null);
     setAiPickerSource(null);
     setAiPickerLoading(false);
+    setAiPickerSeenBookIds([]);
+    setAiPickerQueuedRecommendations([]);
+    setAiPickerContextKey("");
+    aiPickerSeenBookIdsRef.current = [];
+    aiPickerQueuedRecommendationsRef.current = [];
+    aiPickerContextKeyRef.current = "";
+    aiPickerRecommendationsRef.current = [];
+    aiRecommendationRequestIdRef.current += 1;
   }, [clubs.selectedClub]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const warmAiRecommendationCache = async () => {
+      if (!clubs.selectedClub) {
+        return;
+      }
+
+      if (aiPickerContextKeyRef.current !== activeAiContextKey) {
+        setAiPickerRecommendations([]);
+        setAiPickerExplanation(null);
+        setAiPickerSource(null);
+        setAiPickerSeenBookIds([]);
+        setAiPickerQueuedRecommendations([]);
+        setAiPickerContextKey(activeAiContextKey);
+        aiPickerSeenBookIdsRef.current = [];
+        aiPickerQueuedRecommendationsRef.current = [];
+        aiPickerContextKeyRef.current = activeAiContextKey;
+        aiPickerRecommendationsRef.current = [];
+        aiRecommendationRequestIdRef.current += 1;
+      }
+
+      if (aiRecommendationPrefetchRef.current) {
+        return;
+      }
+
+      const seenIds = aiPickerContextKeyRef.current === activeAiContextKey ? aiPickerSeenBookIdsRef.current : [];
+      const queuedIds =
+        aiPickerContextKeyRef.current === activeAiContextKey
+          ? aiPickerQueuedRecommendationsRef.current.map((book) => book.id)
+          : [];
+      const qualityMode: "fast" | "full" = seenIds.length === 0 && queuedIds.length === 0 ? "fast" : "full";
+
+      if (queuedIds.length >= 10) {
+        return;
+      }
+
+      aiRecommendationPrefetchRef.current = fetchRecommendedBooks(activeAiQuery, AI_PICK_POOL_FETCH_SIZE, {
+        clubId: clubs.selectedClub.id,
+        currentBookId: currentClubBookDetails?.id ?? null,
+        shelfFingerprint: recommendationShelfFingerprint,
+        excludeBookIds: [...seenIds, ...queuedIds],
+        qualityMode,
+        hasExplicitPrompt: hasExplicitAiPrompt,
+      })
+        .then((recommendationResult) => {
+          if (ignore) {
+            return null;
+          }
+
+          if (recommendationResult.recommendations.length === 0) {
+            return null;
+          }
+
+          setAiPickerExplanation((current) => current ?? recommendationResult.explanation);
+          setAiPickerSource((current) => current ?? recommendationResult.source);
+          setAiPickerQueuedRecommendations((current) => {
+            const existingIds = new Set(current.map((book) => book.id));
+            const excludedIds = new Set([
+              ...aiPickerSeenBookIdsRef.current,
+              ...aiPickerRecommendationsRef.current.map((book) => book.id),
+              ...current.map((book) => book.id),
+            ]);
+            const uniqueNewBooks = recommendationResult.recommendations.filter(
+              (book) => !existingIds.has(book.id) && !excludedIds.has(book.id)
+            );
+            const nextQueue = uniqueNewBooks.length > 0 ? [...current, ...uniqueNewBooks] : current;
+            aiPickerQueuedRecommendationsRef.current = nextQueue;
+            return nextQueue;
+          });
+
+          return recommendationResult;
+        })
+        .catch(() => {
+          // Best-effort prefetch.
+          return null;
+        })
+        .finally(() => {
+          aiRecommendationPrefetchRef.current = null;
+        });
+    };
+
+    const timer = setTimeout(() => {
+      void warmAiRecommendationCache();
+    }, 500);
+
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
+  }, [
+    activeAiContextKey,
+    activeAiQuery,
+    hasExplicitAiPrompt,
+    aiPickerContextKey,
+    aiPickerQueuedRecommendations,
+    aiPickerSeenBookIds,
+    clubs.selectedClub,
+    currentClubBookDetails?.id,
+    recommendationShelfFingerprint,
+  ]);
 
   useEffect(() => {
     setDiscussionQuestions([]);
@@ -358,30 +568,208 @@ export function useBookClubApp() {
   };
 
   const handleGenerateAiPick = async () => {
-    const query = pickNext.aiPickerPrompt.trim() || clubs.selectedClub?.promptSeed || "book club taste";
-    setAiPickerLoading(true);
+    if (consumeQueuedAiRecommendations()) {
+      return;
+    }
+
+    if (aiRecommendationPrefetchRef.current && !hasExplicitAiPrompt) {
+      const loadingTimer = setTimeout(() => {
+        setAiPickerLoading(true);
+      }, 250);
+
+      try {
+        await aiRecommendationPrefetchRef.current;
+      } finally {
+        clearTimeout(loadingTimer);
+        setAiPickerLoading(false);
+      }
+
+      if (consumeQueuedAiRecommendations()) {
+        return;
+      }
+    }
+
+    const requestId = ++aiRecommendationRequestIdRef.current;
+    const loadingTimer = setTimeout(() => {
+      if (aiRecommendationRequestIdRef.current === requestId) {
+        setAiPickerLoading(true);
+      }
+    }, 250);
 
     try {
-      const recommendationResult = await fetchRecommendedBooks(query, 6);
-      setAiPickerRecommendations(recommendationResult.recommendations);
+      const previousContextKey = aiPickerContextKeyRef.current;
+      const sameContext = previousContextKey === activeAiContextKey;
+      const baseSeenIds = sameContext ? aiPickerSeenBookIdsRef.current : [];
+      const baseVisibleBooks = sameContext ? aiPickerRecommendationsRef.current : [];
+      const baseExcludeIds = sameContext
+        ? Array.from(new Set([...baseSeenIds, ...baseVisibleBooks.map((book) => book.id)]))
+        : [];
+
+      if (hasExplicitAiPrompt) {
+        const fastPromise = fetchRecommendedBooks(activeAiQuery, AI_PICK_PARTIAL_BATCH_SIZE, {
+          clubId: clubs.selectedClub?.id,
+          currentBookId: currentClubBookDetails?.id ?? null,
+          shelfFingerprint: recommendationShelfFingerprint,
+          excludeBookIds: baseExcludeIds,
+          qualityMode: "fast",
+          hasExplicitPrompt: true,
+        });
+        const fullPromise = fetchRecommendedBooks(activeAiQuery, AI_PICK_POOL_FETCH_SIZE, {
+          clubId: clubs.selectedClub?.id,
+          currentBookId: currentClubBookDetails?.id ?? null,
+          shelfFingerprint: recommendationShelfFingerprint,
+          excludeBookIds: baseExcludeIds,
+          qualityMode: "full",
+          hasExplicitPrompt: true,
+        });
+
+        let hasVisiblePartial = false;
+
+        try {
+          const fastResult = await fastPromise;
+          if (aiRecommendationRequestIdRef.current !== requestId) {
+            return;
+          }
+
+          const partialBatch = mergeUniqueById(fastResult.recommendations).slice(0, AI_PICK_PARTIAL_BATCH_SIZE);
+
+          if (partialBatch.length > 0) {
+            hasVisiblePartial = true;
+            const partialSeenIds = Array.from(
+              new Set([...baseSeenIds, ...partialBatch.map((book) => book.id)])
+            );
+
+            setAiPickerRecommendations(partialBatch);
+            setAiPickerQueuedRecommendations([]);
+            setAiPickerSeenBookIds(partialSeenIds);
+            setAiPickerExplanation(fastResult.explanation);
+            setAiPickerSource(fastResult.source);
+            setAiPickerContextKey(activeAiContextKey);
+            setAiPickerLoading(true);
+            aiPickerRecommendationsRef.current = partialBatch;
+            aiPickerQueuedRecommendationsRef.current = [];
+            aiPickerSeenBookIdsRef.current = partialSeenIds;
+            aiPickerContextKeyRef.current = activeAiContextKey;
+            pickNext.generateAiPick();
+          }
+        } catch {
+          // Best-effort fast path. The full request still owns the final result.
+        }
+
+        try {
+          const fullResult = await fullPromise;
+          if (aiRecommendationRequestIdRef.current !== requestId) {
+            return;
+          }
+
+          const mergedPool = mergeUniqueById(
+            aiPickerRecommendationsRef.current,
+            aiPickerQueuedRecommendationsRef.current,
+            fullResult.recommendations
+          );
+          const nextBatch = mergedPool.slice(0, AI_PICK_BATCH_SIZE);
+          const nextQueue = mergedPool.slice(nextBatch.length);
+
+          if (nextBatch.length === 0) {
+            setAiPickerQueuedRecommendations([]);
+            aiPickerQueuedRecommendationsRef.current = [];
+
+            if (!hasVisiblePartial) {
+              setAiPickerRecommendations([]);
+              setAiPickerExplanation(fullResult.explanation);
+              setAiPickerSource(fullResult.source);
+              pickNext.generateAiPick();
+            }
+
+            return;
+          }
+
+          const nextSeenIds = Array.from(new Set([...baseSeenIds, ...nextBatch.map((book) => book.id)]));
+
+          setAiPickerRecommendations(nextBatch);
+          setAiPickerQueuedRecommendations(nextQueue);
+          setAiPickerExplanation(fullResult.explanation);
+          setAiPickerSource(fullResult.source);
+          setAiPickerContextKey(activeAiContextKey);
+          setAiPickerSeenBookIds(nextSeenIds);
+          aiPickerRecommendationsRef.current = nextBatch;
+          aiPickerQueuedRecommendationsRef.current = nextQueue;
+          aiPickerSeenBookIdsRef.current = nextSeenIds;
+          aiPickerContextKeyRef.current = activeAiContextKey;
+          pickNext.generateAiPick();
+          return;
+        } catch (error) {
+          if (aiRecommendationRequestIdRef.current !== requestId) {
+            return;
+          }
+
+          if (hasVisiblePartial) {
+            return;
+          }
+
+          throw error;
+        }
+      }
+
+      const recommendationResult = await fetchRecommendedBooks(activeAiQuery, AI_PICK_POOL_FETCH_SIZE, {
+        clubId: clubs.selectedClub?.id,
+        currentBookId: currentClubBookDetails?.id ?? null,
+        shelfFingerprint: recommendationShelfFingerprint,
+        excludeBookIds: baseExcludeIds,
+        hasExplicitPrompt: hasExplicitAiPrompt,
+      });
+
+      if (aiRecommendationRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const visibleIds = new Set(aiPickerRecommendationsRef.current.map((book) => book.id));
+      const unseenRecommendations = recommendationResult.recommendations.filter((book) => !visibleIds.has(book.id));
+      const nextBatch = unseenRecommendations.slice(0, AI_PICK_BATCH_SIZE);
+      const nextQueue = unseenRecommendations.slice(nextBatch.length);
+
+      if (nextBatch.length === 0) {
+        setAiPickerQueuedRecommendations([]);
+        aiPickerQueuedRecommendationsRef.current = [];
+        return;
+      }
+
+      setAiPickerRecommendations(nextBatch);
+      setAiPickerQueuedRecommendations(nextQueue);
       setAiPickerExplanation(recommendationResult.explanation);
       setAiPickerSource(recommendationResult.source);
+      setAiPickerContextKey(activeAiContextKey);
+      aiPickerContextKeyRef.current = activeAiContextKey;
+      const nextSeenIds = [
+        ...baseSeenIds,
+        ...nextBatch
+          .map((book) => book.id)
+          .filter((id) => !baseSeenIds.includes(id)),
+      ];
+      setAiPickerSeenBookIds(nextSeenIds);
+      aiPickerRecommendationsRef.current = nextBatch;
+      aiPickerQueuedRecommendationsRef.current = nextQueue;
+      aiPickerSeenBookIdsRef.current = nextSeenIds;
       pickNext.generateAiPick();
 
-      if (recommendationResult.recommendations.length === 0) {
+      if (nextBatch.length === 0) {
         Alert.alert("No recommendations found", "Try a broader prompt or add more books to the catalog.");
       }
     } catch (error) {
       setAiPickerRecommendations([]);
       setAiPickerExplanation(null);
       setAiPickerSource(null);
+      setAiPickerQueuedRecommendations([]);
       pickNext.generateAiPick();
       Alert.alert(
         "Recommendation request failed",
         error instanceof Error ? error.message : "The backend recommendation service is unavailable."
       );
     } finally {
-      setAiPickerLoading(false);
+      clearTimeout(loadingTimer);
+      if (aiRecommendationRequestIdRef.current === requestId) {
+        setAiPickerLoading(false);
+      }
     }
   };
 

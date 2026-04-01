@@ -33,10 +33,13 @@ import {
   updateClub,
 } from "../repositories/clubs.js";
 import { findUserById, listUsersByIds } from "../repositories/users.js";
+import { getCachedJson, setCachedJson } from "../services/cache.js";
 import { generateClubTasteInsight, generateDiscussionQuestions } from "../services/bookAssistant.js";
 
 const CLUB_INSIGHT_REFRESH_MS = 1000 * 60 * 60 * 24;
 const CLUB_INSIGHT_FORMAT_VERSION = "v5";
+const CLUB_DISCUSSION_CACHE_TTL_SECONDS = 60 * 60 * 6;
+const CLUB_INSIGHT_CACHE_TTL_SECONDS = 60 * 60 * 6;
 
 type CreateClubBody = {
   name?: string;
@@ -143,8 +146,19 @@ async function getOrCreateCurrentDiscussionQuestions(clubId: string) {
   }
 
   const existingRecord = await findDiscussionQuestionsForClubBook(club.id, book.id);
+  const discussionRedisKey = `clubs:discussion:${club.id}:${book.id}`;
 
   if (existingRecord && existingRecord.questions.length === 5) {
+    await setCachedJson(
+      discussionRedisKey,
+      {
+        currentBookId: book.id,
+        questions: existingRecord.questions,
+        book: book.toJSON(),
+        generatedAt: existingRecord.updatedAt,
+      },
+      CLUB_DISCUSSION_CACHE_TTL_SECONDS
+    );
     return {
       club,
       currentClubBook,
@@ -447,7 +461,31 @@ clubsRouter.get("/:clubId/books", async (req: Request, res: Response) => {
 
 clubsRouter.get("/:clubId/discussion/current", async (req: Request, res: Response) => {
   try {
-    const result = await getOrCreateCurrentDiscussionQuestions(String(req.params.clubId));
+    const clubId = String(req.params.clubId);
+    const currentClubBook = await findCurrentClubBook(clubId);
+
+    if (!currentClubBook) {
+      res.json({
+        currentBookId: null,
+        questions: [],
+      });
+      return;
+    }
+
+    const redisKey = `clubs:discussion:${clubId}:${currentClubBook.bookId}`;
+    const redisCached = await getCachedJson<{
+      currentBookId: string | null;
+      questions: string[];
+      book: Record<string, unknown>;
+      generatedAt: Date | string;
+    }>(redisKey);
+
+    if (redisCached && Array.isArray(redisCached.questions) && redisCached.questions.length === 5) {
+      res.json(redisCached);
+      return;
+    }
+
+    const result = await getOrCreateCurrentDiscussionQuestions(clubId);
 
     if (!result.currentClubBook || !result.record || !result.book) {
       res.json({
@@ -457,12 +495,15 @@ clubsRouter.get("/:clubId/discussion/current", async (req: Request, res: Respons
       return;
     }
 
-    res.json({
+    const responsePayload = {
       currentBookId: result.book.id,
       questions: result.record.questions,
       book: result.book.toJSON(),
       generatedAt: result.record.updatedAt,
-    });
+    };
+
+    await setCachedJson(redisKey, responsePayload, CLUB_DISCUSSION_CACHE_TTL_SECONDS);
+    res.json(responsePayload);
   } catch (error) {
     if (error instanceof Error && error.message === "club not found") {
       res.status(404).json({ error: "club not found" });
@@ -489,6 +530,20 @@ clubsRouter.get("/:clubId/insights", async (req: Request, res: Response) => {
     const books = await listBooksByIds([...new Set(clubBooks.map((clubBook) => clubBook.bookId))]);
     const booksById = new Map(books.map((book) => [book.id, book]));
     const shelfFingerprint = buildShelfFingerprint(clubBooks, booksById);
+    const insightRedisKey = `clubs:insight:${club.id}:${shelfFingerprint}`;
+    const redisCached = await getCachedJson<{
+      insight: {
+        headline: string;
+        summary: string;
+        source: string;
+      };
+    }>(insightRedisKey);
+
+    if (redisCached?.insight?.headline && redisCached?.insight?.summary) {
+      res.json(redisCached);
+      return;
+    }
+
     const cachedInsight = await findClubInsight(club.id);
     const cachedInsightLooksBroken =
       cachedInsight?.headline.includes("[object Object]") ||
@@ -498,13 +553,15 @@ clubsRouter.get("/:clubId/insights", async (req: Request, res: Response) => {
       cachedInsight && Date.now() - cachedInsight.updatedAt.getTime() < CLUB_INSIGHT_REFRESH_MS;
 
     if (cachedInsight && !cachedInsightLooksBroken && cachedInsight.shelfFingerprint === shelfFingerprint && cachedInsightIsFresh) {
-      res.json({
+      const responsePayload = {
         insight: {
           headline: cachedInsight.headline,
           summary: cachedInsight.summary,
           source: cachedInsight.source,
         },
-      });
+      };
+      await setCachedJson(insightRedisKey, responsePayload, CLUB_INSIGHT_CACHE_TTL_SECONDS);
+      res.json(responsePayload);
       return;
     }
 
@@ -559,7 +616,9 @@ clubsRouter.get("/:clubId/insights", async (req: Request, res: Response) => {
       source: insight.source,
     });
 
-    res.json({ insight });
+    const responsePayload = { insight };
+    await setCachedJson(insightRedisKey, responsePayload, CLUB_INSIGHT_CACHE_TTL_SECONDS);
+    res.json(responsePayload);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "could not load club insights" });
   }

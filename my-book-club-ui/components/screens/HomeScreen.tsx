@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Image, Pressable, Text, TextInput, View } from "react-native";
 import { useActionFeedback } from "../../hooks/useActionFeedback";
 import { fetchBookDetails, mergeDetailedBook } from "../../services/api";
@@ -15,11 +15,105 @@ type HomeScreenProps = {
   actions: HomeScreenActions;
 };
 
+const AI_STATUS_ROTATION = [
+  {
+    eyebrow: "AI scout in progress",
+    title: "Reading the room and chasing your next obsession...",
+    body: "Blending your prompt with shelf patterns, club taste, and the strongest local matches.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Weighing mood, pace, and how much chaos you can tolerate...",
+    body: "Trying to avoid obvious picks and surface the book that actually fits the ask.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Cross-checking page-turners against your club's habits...",
+    body: "Letting the fast catalog search do the heavy lifting while the AI trims the list.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Looking for something sharper than a lazy keyword match...",
+    body: "Comparing tone, genre, and recent shelf activity so the result feels intentional.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Checking whether your prompt wants comfort, chaos, or both...",
+    body: "Filtering for books that match the mood without flattening everything into the same recommendation.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Auditioning a few likely page-turners...",
+    body: "Trying to surface the one that feels earned instead of the one everyone always suggests.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Crossing popularity with actual fit...",
+    body: "A famous book is not automatically the right book, so the list is getting trimmed with standards.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Looking for a match with chemistry, not just metadata...",
+    body: "Using the fast catalog signals first, then letting the AI sharpen the shortlist.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Checking if this is more 'late-night spiral' or 'weekend binge'...",
+    body: "Pace matters, tone matters, and the AI is trying not to hand you the wrong kind of intense.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Sorting the precise from the merely adjacent...",
+    body: "Some books technically fit the prompt. The goal here is to find the one that actually feels right.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Comparing shelf clues like a slightly overqualified detective...",
+    body: "Recent saves, finished books, and club taste are all getting a vote before this comes back.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Trying to avoid the recommendation equivalent of beige paint...",
+    body: "Looking for something with a real point of view instead of a safe but forgettable answer.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Checking whether this pick can survive group chat scrutiny...",
+    body: "A strong club pick needs taste, momentum, and just enough edge to spark opinions.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Sweeping for books that feel obvious in hindsight, not in advance...",
+    body: "The best picks tend to look inevitable only after someone smart has done the sorting.",
+  },
+  {
+    eyebrow: "AI scout in progress",
+    title: "Balancing literary instincts with your actual reading mood...",
+    body: "Sometimes the right answer is brilliant, sometimes it is irresistible, and ideally it is both.",
+  },
+];
+
 export function HomeScreen({ model, actions }: HomeScreenProps) {
   const { labels, runWithFeedback } = useActionFeedback();
   const heroRecommendation = model.aiPickerRecommendations[0];
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [bookDetailsLoading, setBookDetailsLoading] = useState(false);
+  const [aiStatusIndex, setAiStatusIndex] = useState(0);
+
+  useEffect(() => {
+    if (!model.aiPickerLoading) {
+      setAiStatusIndex(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setAiStatusIndex((current) => (current + 1) % AI_STATUS_ROTATION.length);
+    }, 1700);
+
+    return () => clearInterval(interval);
+  }, [model.aiPickerLoading]);
+
+  const aiStatus = AI_STATUS_ROTATION[aiStatusIndex] ?? AI_STATUS_ROTATION[0];
 
   const openBookDetails = (book: Book) => {
     setSelectedBook(book);
@@ -55,14 +149,12 @@ export function HomeScreen({ model, actions }: HomeScreenProps) {
             </Pressable>
             {model.aiPickerLoading ? (
               <View style={appStyles.aiStatusCard}>
-                <Text style={appStyles.aiStatusEyebrow}>AI librarian at work</Text>
-                <Text style={appStyles.aiStatusTitle}>Pulling a book that actually fits your mood...</Text>
-                <Text style={appStyles.aiStatusBody}>
-                  Checking your prompt against the catalog, club taste, and a few likely page-turners.
-                </Text>
+                <Text style={appStyles.aiStatusEyebrow}>{aiStatus.eyebrow}</Text>
+                <Text style={appStyles.aiStatusTitle}>{aiStatus.title}</Text>
+                <Text style={appStyles.aiStatusBody}>{aiStatus.body}</Text>
               </View>
             ) : null}
-            {model.aiPickerGenerated ? (
+            {(!model.aiPickerLoading && model.aiPickerGenerated) || model.aiPickerRecommendations.length > 0 ? (
               heroRecommendation ? (
                 <BookCard
                   book={heroRecommendation}
@@ -203,11 +295,9 @@ export function HomeScreen({ model, actions }: HomeScreenProps) {
             </Pressable>
             {model.aiPickerLoading ? (
               <View style={appStyles.aiStatusCard}>
-                <Text style={appStyles.aiStatusEyebrow}>AI librarian at work</Text>
-                <Text style={appStyles.aiStatusTitle}>Reading the room and chasing your next obsession...</Text>
-                <Text style={appStyles.aiStatusBody}>
-                  Blending your prompt with catalog signals, club taste, and a little dramatic flair.
-                </Text>
+                <Text style={appStyles.aiStatusEyebrow}>{aiStatus.eyebrow}</Text>
+                <Text style={appStyles.aiStatusTitle}>{aiStatus.title}</Text>
+                <Text style={appStyles.aiStatusBody}>{aiStatus.body}</Text>
               </View>
             ) : null}
             {model.aiPickerGenerated ? (
